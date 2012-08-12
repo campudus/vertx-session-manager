@@ -1,6 +1,15 @@
 *.class
 *.log
 
+# eclipse specific
+.settings/
+.classpath
+.project
+
+# gradle specific
+.gradle/
+build/
+
 # sbt specific
 dist/*
 target/
@@ -11,3 +20,6 @@ project/plugins/project/
 
 # Scala-IDE specific
 .scala_dependencies
+
+# Scala specific
+.cache
