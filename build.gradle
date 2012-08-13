@@ -110,3 +110,13 @@ task dist( type: Zip, dependsOn: 'copyMod' ) {
   archiveName = 'mod.zip'
   from project.file("build/mod")
 }
+
+task release( type: Copy, dependsOn: 'dist' ) {
+  group = 'vert.x'
+  description = "Builds the module for use in the module repository into mods/$modulename-v$version"
+  destinationDir = project.file('build/mods')
+  into ("$modulename-v$version") {
+    from 'build/libs/mod.zip'
+    from 'README.md'
+  }
+}

@@ -2,6 +2,8 @@
 
 This module allows to store data in a session. Sessions can time out after a specified amount of time. The stored information of timed out sessions will be deleted.
 
+The latest version of this module can be found in the [campudus/vertx-session-manager repository](https://github.com/campudus/vertx-session-manager). 
+
 ## Dependencies
 
 This module requires no special dependencies. It uses SharedData maps provided by Vert.x to save its information.
