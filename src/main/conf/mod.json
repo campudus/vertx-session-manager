@@ -1,3 +1,4 @@
 {
-  "main": "com.campudus.vertx.sessionmanager.SessionManager"
+  "main": "com.campudus.vertx.sessionmanager.SessionManager",
+  "includes": "org.scala-lang.scala-library-v2.9.2"
 }

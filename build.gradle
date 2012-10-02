@@ -49,7 +49,7 @@ dependencies {
   scalaTools "org.scala-lang:scala-library:$scalaVersion"
 
   // Libraries needed for scala api
-  compile "org.scala-lang:scala-library:$scalaVersion"
+  provided "org.scala-lang:scala-library:$scalaVersion"
 }
 
 sourceSets {
@@ -59,7 +59,7 @@ sourceSets {
 }
 
 task copyMod( type:Copy, dependsOn: 'classes' ) {
-  into "build/mod/$modulename-v$version"
+  into "build/copyMod/$modulename-v$version"
   from 'build/classes/main'
   from 'src/main/conf'
   into( 'lib' ) {
@@ -68,7 +68,7 @@ task copyMod( type:Copy, dependsOn: 'classes' ) {
 }
 
 task prepareVertxTest(type: Sync, dependsOn: ['copyMod']) {
-  from 'build/mod'
+  from 'build/copyMod'
   into 'build/tmp/mod-test'
 }
 
@@ -108,15 +108,23 @@ task dist( type: Zip, dependsOn: 'copyMod' ) {
   description = "Assembles a vert.x module in 'mod.zip' format"
   destinationDir = project.file('build/libs')
   archiveName = 'mod.zip'
-  from project.file("build/mod")
+  from project.file("build/copyMod")
 }
 
 task release( type: Copy, dependsOn: 'dist' ) {
   group = 'vert.x'
   description = "Builds the module for use in the module repository into mods/$modulename-v$version"
-  destinationDir = project.file('build/mods')
+  destinationDir = project.file('build/release')
   into ("$modulename-v$version") {
     from 'build/libs/mod.zip'
     from 'README.md'
   }
+}
+
+task install(type: Copy, dependsOn: 'copyMod') {
+  try {
+    destinationDir = new File(System.getenv()['VERTX_MODS'])
+  } catch(NullPointerException e) {
+  }
+  from 'build/copyMod'
 }
