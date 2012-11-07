@@ -7,6 +7,8 @@ import org.vertx.java.core.Handler
 import org.vertx.java.framework.TestClientBase
 import org.vertx.java.core.json.JsonArray
 import scala.actors.threadpool.AtomicInteger
+import org.vertx.java.core.AsyncResultHandler
+import org.vertx.java.core.AsyncResult
 
 class SessionManagerTestClient extends TestClientBase {
 
@@ -34,7 +36,7 @@ class SessionManagerTestClient extends TestClientBase {
     config.putNumber("timeout", defaultTimeout)
     config.putString("prefix", sessionClientPrefix)
 
-    container.deployModule("com.campudus.session-manager-v1.0", config, 1, new Handler[java.lang.String] {
+    container.deployModule("com.campudus.session-manager-v" + System.getProperty("vertx.version"), config, 1, new Handler[java.lang.String] {
       def handle(res: String) {
         tu.appReady();
       }
@@ -97,8 +99,6 @@ class SessionManagerTestClient extends TestClientBase {
           continueAfterNoErrorReply {
             msgAfterPut =>
               tu.azzert(msgAfterPut.body.getBoolean("sessionSaved", false), "Session should have been saved!")
-              System.err.println("Should have saved " + data.encode)
-
               after(sessionId)
           })
     }
@@ -363,7 +363,6 @@ class SessionManagerTestClient extends TestClientBase {
                       tu.azzert(someData.getObject("object2").equals(data.getObject("object2")), "object2 should still exist")
                       val object1 = someData.getObject("object1")
                       val newObject1 = data.getObject("object1")
-                      System.err.println("object1 is now: " + newObject1.encode);
                       tu.azzert(!object1.equals(newObject1), "object1 should be different now")
                       tu.azzert(newObject1.getString("key1") == null, "key1 should not exist anymore in object1")
                       tu.azzert(newObject1.getNumber("key2") == null, "key2 should not exist anymore in object1")
@@ -547,7 +546,7 @@ class SessionManagerTestClient extends TestClientBase {
   def testCleanupAfterSession() {
     afterClearDo {
       var unregisterIt = { () => }
-      val handlerId = eb.registerHandler(cleanupAddress, new Handler[Message[JsonObject]]() {
+      val handler = new Handler[Message[JsonObject]]() {
         def handle(msg: Message[JsonObject]) {
           tu.azzert(msg.body.getObject("session") != null, "Should get a real session for cleanup!")
           msg.body.getObject("session") match {
@@ -555,14 +554,13 @@ class SessionManagerTestClient extends TestClientBase {
               container.getLogger.info("Got session: " + session.encode)
               tu.azzert(msg.body.getString("sessionId") != null, "should have a sessionId")
               tu.azzert(someData.equals(session), "session should equal someData")
-              unregisterIt()
+              eb.unregisterHandler(cleanupAddress, this)
               tu.testComplete
           }
         }
-      })
-      unregisterIt = { () =>
-        eb.unregisterHandler(handlerId)
       }
+
+      eb.registerHandler(cleanupAddress, handler)
 
       afterPutDo {
         sessionId =>
@@ -591,23 +589,17 @@ class SessionManagerTestClient extends TestClientBase {
       afterPutDo {
         sessionId =>
           var statusReceived = false
-          var unregisterIt = { () => }
 
-          val handlerId: String = eb.registerHandler(sessionClientPrefix + sessionId, new Handler[Message[JsonObject]]() {
+          val address = sessionClientPrefix + sessionId
+          val handler = new Handler[Message[JsonObject]]() {
             override def handle(msg: Message[JsonObject]) {
-              System.err.println("received message in handler: " + msg.body.encode);
               val statusMessage = msg.body.getString("status")
               tu.azzert(statusMessage == "SESSION_TIMEOUT", "Status message should have been session timeout, but got: " + statusMessage)
               statusReceived = true
-              unregisterIt()
+              eb.unregisterHandler(address, this)
             }
-          })
-
-          unregisterIt = { () =>
-            eb.unregisterHandler(handlerId)
           }
-
-          System.err.println("registered handler at session." + sessionId)
+          eb.registerHandler(address, handler)
 
           Thread.sleep(timeoutTest)
 
@@ -616,7 +608,6 @@ class SessionManagerTestClient extends TestClientBase {
             .putArray("fields", new JsonArray().addString("teststring")),
             continueAfterErrorReply {
               errorMsg =>
-                System.err.println("received error (session is gone): " + errorMsg.body.encode);
                 tu.azzert(statusReceived, "Did not receive status 'Session timeout.'!")
                 tu.testComplete
             })

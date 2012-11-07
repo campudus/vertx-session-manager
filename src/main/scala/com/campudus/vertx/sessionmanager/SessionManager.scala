@@ -70,7 +70,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   }
 
   private def destroySession(sessionId: String, cause: String) {
-    container.getLogger.info(cause + " sende an session." + sessionId + " und " + cleanupAddress)
     vertx.eventBus.send(sessionClientPrefix + sessionId, new JsonObject().putString("status", cause));
     if (cleanupAddress != null) {
       val sessionString = sharedSessions.remove(sessionId)
@@ -93,8 +92,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   }
 
   override def handle(message: Message[JsonObject]) {
-    container.getLogger.info("SessionManager received message: " + message.body.encode)
-
     message.body.getField("action") match {
       case "get" => message.body.getField("sessionId") match {
         case null => message.reply(createJsonError("SESSIONID_MISSING", "Cannot get data from session: sessionId parameter is missing."))
@@ -186,10 +183,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
         // TODO more reports for the administrator
         message.body.getString("report") match {
           case "connections" =>
-            for ((id, sessionString) <- sharedSessions) {
-              container.getLogger.info("session: " + id + " content: " + sessionString)
-            }
-            container.getLogger.info("openSessions: " + sharedSessions.size)
             message.reply(new JsonObject().putNumber("openSessions", sharedSessions.size))
           case "matches" =>
             message.body.getField("data") match {
@@ -223,12 +216,10 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   }
 
   private def createJsonError(error: String, message: String) = {
-    container.getLogger.warn(message)
     new JsonObject().putString("error", error).putString("description", message)
   }
 
   private def raiseJsonError(sessionId: String, error: String, message: String) = {
-    container.getLogger.warn("SessionId: " + sessionId + ", error: " + error)
     vertx.eventBus.send(sessionClientPrefix + sessionId, new JsonObject().putString("status", error))
     new JsonObject().putString("error", message)
   }
