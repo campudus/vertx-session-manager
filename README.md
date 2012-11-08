@@ -6,7 +6,7 @@ The latest version of this module can be found in the [campudus/vertx-session-ma
 
 ## Dependencies
 
-This module requires the scala language module (org.scala-lang.scala-library-v2.9.2) to work.
+This module requires the scala language module (org.scala-lang.scala-library-v2.9.2) to work. It is built against Vert.x 1.3.0.
 
 It uses SharedData maps provided by Vert.x to save its information.
 
@@ -51,8 +51,9 @@ The module supports a few operations. If you want to let clients use the session
 Operations are sent by specifying an `action` String and required and optional parameters. If a required parameter is missing, the server will reply with an error message in this format:
 
     {
-         "error": "KIND_OF_ERROR",
-         "description": "Some kind of descriptive text, what went wrong exactly"
+        "status" : "error",
+        "error" : "KIND_OF_ERROR",
+        "message" : "Some kind of descriptive text, what went wrong exactly"
     }
 
 The session manager can also _raise_ errors to the client directly, sending an error message to `campudus.session.94b1a3fe-16df-4ab2-ac10-aae67ad2c46d` for example, if the prefix is set to `campudus.sessions.`. If you provide an action which the session manager does not know, it will reply with error `UNKNOWN_COMMAND`.
