@@ -70,7 +70,7 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   }
 
   private def destroySession(sessionId: String, cause: String) {
-    vertx.eventBus.send(sessionClientPrefix + sessionId, new JsonObject().putString("status", cause));
+    vertx.eventBus.send(sessionClientPrefix + sessionId, new JsonObject().putString("status", "error").putString("error", cause));
     if (cleanupAddress != null) {
       val sessionString = sharedSessions.remove(sessionId)
       vertx.eventBus.send(cleanupAddress, new JsonObject().putString("sessionId", sessionId)
@@ -216,12 +216,13 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   }
 
   private def createJsonError(error: String, message: String) = {
-    new JsonObject().putString("error", error).putString("description", message)
+    new JsonObject().putString("status", "error").putString("error", error).putString("message", message)
   }
 
   private def raiseJsonError(sessionId: String, error: String, message: String) = {
-    vertx.eventBus.send(sessionClientPrefix + sessionId, new JsonObject().putString("status", error))
-    new JsonObject().putString("error", message)
+    val errorJson = createJsonError(error, message)
+    vertx.eventBus.send(sessionClientPrefix + sessionId, errorJson)
+    errorJson
   }
 
   private def startSession(): String = {

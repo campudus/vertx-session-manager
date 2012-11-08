@@ -54,10 +54,15 @@ class SessionManagerTestClient extends TestClientBase {
     }
   }
 
-  private def continueAfterErrorReply(fn: (Message[JsonObject]) => Unit) = new Handler[Message[JsonObject]]() {
-    override def handle(msg: Message[JsonObject]) = msg.body.getString("error") match {
+  private def continueAfterErrorReply(error: String)(fn: (Message[JsonObject]) => Unit) = new Handler[Message[JsonObject]]() {
+    override def handle(msg: Message[JsonObject]) = msg.body.getString("status") match {
       case null => tu.azzert(false, "Should get an error, but got no error! " + msg.body.encode)
-      case str => fn(msg)
+      case "error" =>
+        if (error != null) {
+          tu.azzert(error == msg.body.getString("error"), error + " does not equal " + msg.body.getString("error"))
+        }
+        fn(msg)
+      case str => tu.azzert(false, "Should get an error status, but got different status: " + str)
     }
   }
 
@@ -205,7 +210,7 @@ class SessionManagerTestClient extends TestClientBase {
             new JsonObject().putString("action", "put")
               .putString("sessionId", sessionId + "123")
               .putObject("data", someData),
-            continueAfterErrorReply {
+            continueAfterErrorReply("SESSION_GONE") {
               msgAfterErrorPut =>
                 tu.testComplete()
             })
@@ -234,7 +239,7 @@ class SessionManagerTestClient extends TestClientBase {
             new JsonObject().putString("action", "get")
               .putString("sessionId", sessionId + "123")
               .putArray("fields", new JsonArray().addString("teststring")),
-            continueAfterErrorReply {
+            continueAfterErrorReply("SESSION_GONE") {
               msgAfterErrorPut =>
                 if (asynchTests.incrementAndGet == asynchTestCount) {
                   tu.testComplete
@@ -245,9 +250,8 @@ class SessionManagerTestClient extends TestClientBase {
           eb.send(smAddress,
             new JsonObject().putString("action", "get")
               .putString("sessionId", sessionId),
-            continueAfterErrorReply {
+            continueAfterErrorReply("FIELDS_MISSING") {
               msgAfterErrorPut =>
-                tu.azzert("FIELDS_MISSING" == msgAfterErrorPut.body.getString("error"), "Should result in error 'FIELDS_MISSING'")
                 if (asynchTests.incrementAndGet == asynchTestCount) {
                   tu.testComplete
                 }
@@ -277,9 +281,8 @@ class SessionManagerTestClient extends TestClientBase {
 
         def errorTest(json: JsonObject, error: String) = {
           eb.send(smAddress, json,
-            continueAfterErrorReply {
+            continueAfterErrorReply(error) {
               errorMessage =>
-                tu.azzert(error == errorMessage.body.getString("error"))
                 if (asynchTests.incrementAndGet == asynchTestCount) {
                   tu.testComplete
                 }
@@ -521,10 +524,8 @@ class SessionManagerTestClient extends TestClientBase {
                 eb.send(smAddress,
                   new JsonObject().putString("action", "get").putString("sessionId", sessionId)
                     .putArray("fields", new JsonArray().addString("object1")),
-                  continueAfterErrorReply {
+                  continueAfterErrorReply("SESSION_GONE") {
                     msgAfterGet2 =>
-                      tu.azzert(msgAfterGet2.body.getString("error") != null, "There should be an error accessing the session now")
-
                       if (asynchTests.incrementAndGet == asynchTestCount) {
                         tu.testComplete()
                       }
@@ -593,8 +594,9 @@ class SessionManagerTestClient extends TestClientBase {
           val address = sessionClientPrefix + sessionId
           val handler = new Handler[Message[JsonObject]]() {
             override def handle(msg: Message[JsonObject]) {
-              val statusMessage = msg.body.getString("status")
-              tu.azzert(statusMessage == "SESSION_TIMEOUT", "Status message should have been session timeout, but got: " + statusMessage)
+              tu.azzert("error" == msg.body.getString("status"))
+              val statusMessage = msg.body.getString("error")
+              tu.azzert(statusMessage == "SESSION_TIMEOUT", "Error tag should have been SESSION_TIMEOUT, but got: " + statusMessage)
               statusReceived = true
               eb.unregisterHandler(address, this)
             }
@@ -606,7 +608,7 @@ class SessionManagerTestClient extends TestClientBase {
           eb.send(smAddress, new JsonObject().putString("action", "get")
             .putString("sessionId", sessionId)
             .putArray("fields", new JsonArray().addString("teststring")),
-            continueAfterErrorReply {
+            continueAfterErrorReply("SESSION_GONE") {
               errorMsg =>
                 tu.azzert(statusReceived, "Did not receive status 'Session timeout.'!")
                 tu.testComplete
