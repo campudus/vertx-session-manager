@@ -273,7 +273,7 @@ class SessionManagerTestClient extends TestClientBase {
     }
   }
 
-  def testWrongDataTypes() {
+  def testCheckErrorTypes() {
     afterPutDo {
       sessionId =>
         val asynchTestCount = 11
@@ -298,6 +298,11 @@ class SessionManagerTestClient extends TestClientBase {
           .putArray("fields", new JsonArray().addString("teststring")),
           "WRONG_DATA_TYPE")
 
+        // fields parameter missing in get
+        errorTest(new JsonObject().putString("action", "get")
+          .putString("sessionId", sessionId),
+          "FIELDS_MISSING")
+
         // wrong sessionId parameter in put
         errorTest(new JsonObject().putString("action", "put")
           .putNumber("sessionId", 1)
@@ -312,11 +317,6 @@ class SessionManagerTestClient extends TestClientBase {
 
         // wrong sessionId parameter in heartbeat
         errorTest(new JsonObject().putString("action", "heartbeat")
-          .putNumber("sessionId", 1),
-          "WRONG_DATA_TYPE")
-
-        // wrong sessionId parameter in destroy
-        errorTest(new JsonObject().putString("action", "destroy")
           .putNumber("sessionId", 1),
           "WRONG_DATA_TYPE")
 

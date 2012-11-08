@@ -32,7 +32,7 @@ class SessionManagerTest extends TestBase {
   def testGetFieldsSession() = startTest(getMethodName())
 
   @Test
-  def testWrongDataTypes() = startTest(getMethodName())
+  def testCheckErrorTypes() = startTest(getMethodName())
 
   @Test
   def testOverwriteSessionData() = startTest(getMethodName())
