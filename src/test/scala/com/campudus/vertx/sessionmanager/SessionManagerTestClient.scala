@@ -10,7 +10,17 @@ import scala.actors.threadpool.AtomicInteger
 import org.vertx.java.core.AsyncResultHandler
 import org.vertx.java.core.AsyncResult
 
+object SessionManagerTestClient {
+  val VERSION = "1.1.0"
+  val sessionClientPrefix: String = "session."
+  val cleanupAddress: String = "sessioncleaner"
+  val defaultTimeout: Long = 5000
+  val noTimeoutTest: Long = 3500
+  val timeoutTest: Long = 10000
+}
+
 class SessionManagerTestClient extends TestClientBase {
+  import SessionManagerTestClient._
 
   val smAddress = "sessions"
 
@@ -21,11 +31,6 @@ class SessionManagerTestClient extends TestClientBase {
     .putNumber("answer", 42)
 
   var eb: EventBus = null
-  val sessionClientPrefix: String = "session."
-  val cleanupAddress: String = "sessioncleaner"
-  val defaultTimeout: Long = 5000
-  val noTimeoutTest: Long = 3500
-  val timeoutTest: Long = 10000
 
   override def start() {
     super.start()
@@ -36,7 +41,11 @@ class SessionManagerTestClient extends TestClientBase {
     config.putNumber("timeout", defaultTimeout)
     config.putString("prefix", sessionClientPrefix)
 
-    container.deployModule("com.campudus.session-manager-v" + System.getProperty("vertx.version"), config, 1, new Handler[java.lang.String] {
+    container.deployModule("com.campudus.session-manager-v" +
+      (System.getProperty("vertx.version") match {
+        case null => VERSION
+        case sth => sth
+      }), config, 1, new Handler[java.lang.String] {
       def handle(res: String) {
         tu.appReady();
       }
