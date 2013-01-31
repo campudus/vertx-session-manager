@@ -23,6 +23,7 @@ import org.vertx.java.core.json.JsonObject
 import org.vertx.java.core.Handler
 import org.vertx.java.deploy.Verticle
 import org.vertx.java.core.json.JsonArray
+import org.vertx.java.core.logging.Logger
 
 /**
  * Session Manager Module for Vert.x
@@ -35,7 +36,7 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   private val defaultTimeout: Long = 30 * 60 * 1000 // 30 minutes
   private val defaultSessionClientPrefix = "campudus.session."
   private var sharedSessions: ConcurrentMap[String, String] = null
-  private var sharedSessionTimeouts: ConcurrentMap[String, Long] = null
+  private var sharedSessionTimeouts: ConcurrentMap[String, String] = null
   private var configTimeout = defaultTimeout
   private var cleanupAddress: String = null
   private var sessionClientPrefix: String = null
@@ -61,11 +62,15 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   }
 
   private def resetTimer(sessionId: String) = {
-    if (vertx.cancelTimer(sharedSessionTimeouts.get(sessionId))) {
-      sharedSessionTimeouts.put(sessionId, createTimer(sessionId, configTimeout))
-      true
-    } else {
-      false
+    sharedSessionTimeouts.get(sessionId) match {
+      case null =>
+        false
+      case timerId =>
+        if (sharedSessionTimeouts.replace(sessionId, timerId, createTimer(sessionId, configTimeout).toString)) {
+          vertx.cancelTimer(timerId.toLong)
+        } else {
+          false
+        }
     }
   }
 
@@ -78,7 +83,7 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
     } else {
       sharedSessions.remove(sessionId)
     }
-    vertx.cancelTimer(sharedSessionTimeouts.remove(sessionId))
+    vertx.cancelTimer(sharedSessionTimeouts.remove(sessionId).toLong)
   }
 
   private def getSession(sessionId: String) = {
@@ -152,7 +157,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
 
       case "start" =>
         val sessionId = startSession()
-        sharedSessionTimeouts.put(sessionId, createTimer(sessionId, configTimeout))
         message.reply(new JsonObject().putString("sessionId", sessionId))
 
       case "heartbeat" =>
@@ -226,13 +230,13 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
   }
 
   private def startSession(): String = {
-    val uuid = UUID.randomUUID.toString
-    sharedSessions.putIfAbsent(uuid, new JsonObject().encode) match {
+    val sessionId = UUID.randomUUID.toString
+    sharedSessions.putIfAbsent(sessionId, "{}") match {
       case null =>
-        sharedSessionTimeouts.put(uuid, configTimeout)
+        sharedSessionTimeouts.put(sessionId, createTimer(sessionId, configTimeout).toString)
         // There is no session with this uuid -> return it
-        uuid
-      case sessionId =>
+        sessionId
+      case anotherSessionId =>
         // There was a session with this uuid -> create a new one
         startSession
     }

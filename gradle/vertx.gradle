@@ -1,0 +1,203 @@
+import org.gradle.api.Project
+import org.gradle.api.Plugin
+import org.gradle.api.tasks.Copy
+import org.gradle.api.tasks.bundling.Zip
+
+apply plugin: VertxPlugin
+
+class VertxPlugin implements Plugin<Project> {
+
+	void apply(Project project) {
+		project.extensions.create('vertx', VertxPluginExtension, project)
+
+		addConfigurations(project)
+		project.gradle.projectsEvaluated {
+			addDependencies(project)
+			addSourceSets(project)
+
+			addTasks(project)
+
+			Test vertxIntegration = project.task([type: Test, dependsOn: [
+					'prepareVertxModule',
+					'prepareVertxIntegration'
+				]], 'vertxIntegration', {
+				group = 'vert.x'
+				description = 'Run vert.x integration tests'
+
+				testClassesDir = project.sourceSets.vertxIntegration.output.classesDir
+
+				// Add stuff we DO need
+				classpath += project.configurations.vertxIntegrationRuntime
+				classpath += project.sourceSets.vertxIntegration.output
+				// Remove stuff we DO NOT need
+				classpath -= project.sourceSets.main.output
+
+				// FIXME lazily evaluate these:
+				testLogging.showStandardStreams = true
+
+				systemProperty 'vertx.test.timeout', project.vertx.testTimeout
+				systemProperty 'vertx.mods', project.file(project.vertx.modsDir)
+				systemProperty 'vertx.version', project.version
+				testLogging.showStandardStreams = project.vertx.showStandardStreams
+			})
+		}
+	}
+
+	void addTasks(Project project) {
+		project.task('prepareVertxModule', type: Copy, dependsOn: 'classes') {
+			group = 'Vert.x'
+			description = 'Prepares the module for packaging'
+			destinationDir = project.file("${project.buildDir}/prepareVertxModule")
+
+			from project.sourceSets.main.output.classesDir
+			from project.sourceSets.main.output.resourcesDir
+			from project.file('src/main/conf')
+			into( 'lib' ) {
+				from (project.configurations.runtime - project.configurations.vertxProvided)
+			}
+		}
+
+		// Package into build/libs/mod.zip
+		project.task('packVertxModule', type: Zip, dependsOn: 'prepareVertxModule') {
+			group = 'Vert.x'
+			description = 'Zips the Vert.x module.'
+			destinationDir = project.file("${project.buildDir}/packVertxModule")
+
+			archiveName = "${project.vertx.moduleName}.zip"
+			from project.file("${project.buildDir}/prepareVertxModule")
+		}
+
+		project.task([type: Sync, dependsOn: ['prepareVertxModule']], 'prepareVertxIntegration', {
+			group = 'vert.x'
+			description = 'Prepares the integration tests for this module'
+			from project.tasks.prepareVertxModule.destinationDir
+			into(project.vertx.modsDir + '/' + project.vertx.moduleName)
+		})
+
+		project.task('module', type: Copy, dependsOn: 'packVertxModule') {
+			group = 'Vert.x'
+			description = 'Assembles the Vert.x module.'
+			destinationDir = project.file("${project.buildDir}/module")
+
+			from project.file('./README.md')
+			from project.tasks.packVertxModule.destinationDir
+		}
+	}
+
+	void addConfigurations(Project project) {
+		project.configurations {
+			vertxProvided {
+				description = 'Classpath provided by Vert.x'
+				visible = false
+			}
+			compile.extendsFrom vertxProvided
+			runtime.extendsFrom vertxProvided
+		}
+	}
+
+	void addSourceSets(Project project) {
+		project.sourceSets {
+			vertxIntegration {
+				compileClasspath += test.output + test.compileClasspath
+				runtimeClasspath += test.output + test.runtimeClasspath
+			}
+		}
+	}
+
+	void reorderClasspathForScala(Project project) {
+		// removes some warnings of Scala Eclipse IDE by reordering classpath
+		project.eclipse {
+			classpath {
+				containers "org.scala-ide.sdt.launching.SCALA_CONTAINER"
+				file {
+					whenMerged { classpath ->
+						def javaRuntime = classpath.entries.find { it instanceof org.gradle.plugins.ide.eclipse.model.Container && it.path.contains('JRE_CONTAINER') }
+						def scalaRuntime = classpath.entries.find { it instanceof org.gradle.plugins.ide.eclipse.model.Container && it.path.contains('SCALA_CONTAINER') }
+						def scalaLib = classpath.entries.findAll { it.toString().contains("scala-library") }
+						// Avoid problems with the Scala IDE
+						classpath.entries.removeAll(scalaLib)
+						// Change container order to support running unit tests
+						if(javaRuntime != null && scalaRuntime != null) {
+							classpath.entries.remove(javaRuntime)
+							classpath.entries.remove(scalaRuntime)
+							classpath.entries.add(scalaRuntime)
+							classpath.entries.add(javaRuntime)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	void addDependencies(Project project) {
+		project.dependencies {
+			vertxProvided "org.vert-x:vertx-core:${project.vertx.version}"
+			vertxProvided "org.vert-x:vertx-platform:${project.vertx.version}"
+			project.vertx.langs.each {
+				if (it == 'scala') {
+					project.dependencies {
+						// Libraries needed to run the scala tools
+						scalaTools "org.scala-lang:scala-compiler:${project.scalaVersion}"
+						// Libraries needed for scala api
+						vertxProvided "org.scala-lang:scala-library:${project.scalaVersion}"
+					}
+
+					if (project.plugins.hasPlugin('eclipse')) {
+						reorderClasspathForScala(project)
+					}
+				} else {
+					vertxProvided "org.vert-x:vertx-lang-${it}:${project.vertx.version}"
+				}
+			}
+
+			if (project.vertx.useTestframework) {
+				testCompile("org.vert-x:vertx-testframework:${project.vertx.version}") { transitive = false }
+			}
+			if (project.vertx.annotationsVersion != null) {
+				testCompile "org.vert-x:vertx-junit-annotations:${project.vertx.annotationsVersion}"
+			}
+			if (project.vertx.junitVersion != null) {
+				testCompile "junit:junit:${project.vertx.junitVersion}"
+			}
+			if (project.vertx.scalaHelpersVersion != null) {
+				compile "com.campudus:scala-core-helpers:${project.vertx.scalaHelpersVersion}"
+				testCompile "com.campudus:scala-core-helpers:${project.vertx.scalaHelpersVersion}"
+				testCompile "com.campudus:scala-test-helpers:${project.vertx.scalaHelpersVersion}"
+			}
+		}
+
+		project.repositories {
+			mavenLocal()
+			maven { url 'https://oss.sonatype.org/content/repositories/snapshots' }
+			mavenCentral()
+		}
+	}
+}
+
+class VertxPluginExtension {
+	String version
+	String moduleName
+	def langs
+	boolean useTestframework
+	boolean showStandardStreams
+	String annotationsVersion
+	String junitVersion
+	String scalaHelpersVersion
+	long testTimeout
+	String modsDir
+
+	VertxPluginExtension(Project project) {
+		version = (project.metaClass.hasProperty('vertxVersion')) ? "${project.vertxVersion}" : '1.3.1.final'
+		moduleName = "${project.group}." +
+				(project.ext.has('modName') ? project.modName : project.name) +
+				"-v${project.version}"
+		langs = []
+		useTestframework = (project.metaClass.hasProperty('useTestframework')) ? "${project.useTestframework}" : false
+		showStandardStreams = (project.metaClass.hasProperty('showStandardStreams')) ? "${project.showStandardStreams}" : true
+		annotationsVersion = (project.metaClass.hasProperty('junitAnnotationsVersion')) ? "${project.junitAnnotationsVersion}" : null
+		junitVersion = (project.metaClass.hasProperty('junitVersion')) ? "${project.junitVersion}" : null
+		scalaHelpersVersion = (project.metaClass.hasProperty('scalaHelpersVersion')) ? "${project.scalaHelpersVersion}" : null
+		testTimeout = (project.metaClass.hasProperty('testTimeout')) ? "${project.testTimeout}" : 15
+		modsDir = (project.metaClass.hasProperty('modsDir')) ? "${project.modsDir}" : 'build/tmp/mods-test'
+	}
+}

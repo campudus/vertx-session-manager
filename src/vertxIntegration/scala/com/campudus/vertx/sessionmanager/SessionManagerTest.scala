@@ -1,7 +1,7 @@
 package com.campudus.vertx.sessionmanager;
 
 import org.junit.Test
-import org.vertx.java.framework.TestBase
+import org.vertx.java.testframework.TestBase
 
 class SessionManagerTest extends TestBase {
 
@@ -57,6 +57,9 @@ class SessionManagerTest extends TestBase {
 
   @Test
   def testNoTimeoutSession() = startTest(getMethodName())
+
+  @Test
+  def testErrorOnHeartbeatWithNotExistingSession() = startTest(getMethodName())
 
   @Test
   def testHeartbeatSession() = startTest(getMethodName())

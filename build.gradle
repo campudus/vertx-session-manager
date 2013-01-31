@@ -1,158 +1,35 @@
 /*
-* Copyright 2012 the original author or authors.
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-* http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Copyright 2012 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 apply plugin: 'scala'
 apply plugin: 'eclipse'
 apply plugin: 'idea'
 
-defaultTasks = ['assemble']
+apply from: 'gradle/vertx.gradle'
 
-sourceCompatibility = '1.7'
-targetCompatibility = '1.7'
-
-jar.enabled = false // we don't need this
-
-configurations {
-  provided
-}
-
-repositories {
-  maven { url 'https://oss.sonatype.org/content/repositories/snapshots' }
-  mavenCentral()
-}
-
-dependencies {
-  provided "org.vert-x:vertx-core:$vertxVersion"
-  provided "org.vert-x:vertx-platform:$vertxVersion"
-
-  testCompile "org.vert-x:vertx-lang-java:$vertxVersion"
-  testCompile( "org.vert-x:vertx-testframework:$vertxVersion" ) {
-    transitive = false
-  }
-  testCompile "junit:junit:$junitVersion"
-
-  // Libraries needed to run the scala tools
-  scalaTools "org.scala-lang:scala-compiler:$scalaVersion"
-  scalaTools "org.scala-lang:scala-library:$scalaVersion"
-
-  // Libraries needed for scala api
-  compile "org.scala-lang:scala-library:$scalaVersion"
-  provided "org.scala-lang:scala-library:$scalaVersion"
-
-}
-
-eclipse {
-  classpath {
-   // plusConfigurations += configurations.moduleJars
-
-    containers "org.scala-ide.sdt.launching.SCALA_CONTAINER"
-    file {
-      whenMerged { classpath ->
-        def javaRuntime = classpath.entries.find { it instanceof org.gradle.plugins.ide.eclipse.model.Container && it.path.contains('JRE_CONTAINER') }
-        def scalaRuntime = classpath.entries.find { it instanceof org.gradle.plugins.ide.eclipse.model.Container && it.path.contains('SCALA_CONTAINER') }
-        def scalaLib = classpath.entries.findAll { it.toString().contains("scala-library") }
-
-        // Avoid problems with the Scala IDE
-        classpath.entries.removeAll(scalaLib)
-
-        // Change container order to support running unit tests
-        if(javaRuntime != null && scalaRuntime != null) {
-          classpath.entries.remove(javaRuntime)
-          classpath.entries.remove(scalaRuntime)
-          classpath.entries.add(scalaRuntime)
-          classpath.entries.add(javaRuntime)
-        }
-      }
-    } 
-  }
-}
-
-sourceSets {
-  main {
-    compileClasspath = compileClasspath + configurations.provided
-  }
-}
-
-task copyMod( type:Copy, dependsOn: 'classes' ) {
-  into "build/copyMod/$modulename-v$version"
-  from 'build/classes/main'
-  from 'src/main/conf'
-  into( 'lib' ) {
-    from (configurations.compile-configurations.provided)
-  }
-}
-
-task prepareVertxTest(type: Sync, dependsOn: ['copyMod']) {
-  from 'build/copyMod'
-  into 'build/tmp/mod-test'
+vertx {
+	version = "${project.vertxVersion}"
+	junitVersion = "${project.junitVersion}"
+	useTestframework = true
+	langs = ['java', 'scala']
+	testTimeout = 30
+	showStandardStreams = true
 }
 
 test {
-  // Can't have the app on the vert.x classpath
-  classpath = files( classpath.findAll {
-    !( it.toString() ==~ /.+build\/(classes|resources)\/main$/ )
-  } )
-
-  // Some vert.x properties
-  systemProperty 'vertx.test.timeout', 15
-  systemProperty 'vertx.mods', "$projectDir/build/tmp/mod-test"
-  systemProperty 'vertx.version', "$project.version"
-
-  // Dump output
-  testLogging.showStandardStreams = true
-
-  // No idea why we need to depend on testClasses...
-  dependsOn << [ 'testClasses', 'copyMod', 'prepareVertxTest' ]
-}
-
-task collectDeps(type: Copy) {
-  group = 'vert.x'
-  description = 'conveniently collect dependencies for other IDEs'
-  destinationDir = file("build/deps")
-  into("compile") {
-    from configurations.compile
-  }
-  into("test") {
-    from configurations.testCompile
-  }
-}
-
-// Package into build/libs/mod.zip
-task dist( type: Zip, dependsOn: 'copyMod' ) {
-  group = 'vert.x'
-  description = "Assembles a vert.x module in 'mod.zip' format"
-  destinationDir = project.file('build/libs')
-  archiveName = 'mod.zip'
-  from project.file("build/copyMod")
-}
-
-task release( type: Copy, dependsOn: 'dist' ) {
-  group = 'vert.x'
-  description = "Builds the module for use in the module repository into mods/$modulename-v$version"
-  destinationDir = project.file('build/release')
-  into ("$modulename-v$version") {
-    from 'build/libs/mod.zip'
-    from 'README.md'
-  }
-}
-
-task install(type: Copy, dependsOn: 'copyMod') {
-  try {
-    destinationDir = new File(System.getenv()['VERTX_MODS'])
-  } catch(NullPointerException e) {
-  }
-  from 'build/copyMod'
+	//makes the standard streams (err and out) visible at console when running tests
+	testLogging.showStandardStreams = true
 }

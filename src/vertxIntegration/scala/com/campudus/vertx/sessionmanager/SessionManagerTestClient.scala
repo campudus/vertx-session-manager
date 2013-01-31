@@ -1,17 +1,17 @@
 package com.campudus.vertx.sessionmanager
 
+import scala.actors.threadpool.AtomicInteger
+import scala.collection.JavaConversions.iterableAsScalaIterable
+import org.vertx.java.core.Handler
 import org.vertx.java.core.eventbus.EventBus
 import org.vertx.java.core.eventbus.Message
-import org.vertx.java.core.json.JsonObject
-import org.vertx.java.core.Handler
-import org.vertx.java.framework.TestClientBase
 import org.vertx.java.core.json.JsonArray
-import scala.actors.threadpool.AtomicInteger
-import org.vertx.java.core.AsyncResultHandler
-import org.vertx.java.core.AsyncResult
+import org.vertx.java.core.json.JsonObject
+import org.vertx.java.testframework.TestClientBase
+import org.junit.runner.RunWith
 
 object SessionManagerTestClient {
-  val VERSION = "1.1.0"
+  val VERSION = "1.1.1"
   val sessionClientPrefix: String = "session."
   val cleanupAddress: String = "sessioncleaner"
   val defaultTimeout: Long = 5000
@@ -561,7 +561,6 @@ class SessionManagerTestClient extends TestClientBase {
           tu.azzert(msg.body.getObject("session") != null, "Should get a real session for cleanup!")
           msg.body.getObject("session") match {
             case session =>
-              container.getLogger.info("Got session: " + session.encode)
               tu.azzert(msg.body.getString("sessionId") != null, "should have a sessionId")
               tu.azzert(someData.equals(session), "session should equal someData")
               eb.unregisterHandler(cleanupAddress, this)
@@ -667,14 +666,13 @@ class SessionManagerTestClient extends TestClientBase {
     }
   }
 
-  // TODO test implementieren
-  def testUnlimitedTimeout() {
-    val config = new JsonObject().putNumber("timeout", 0).putString("address", "session2")
-    val moduleId = container.deployModule("com.campudus.session-manager-v1.0", config, 1, new Handler[java.lang.String] {
-      def handle(res: String) {
-
-      }
-    })
-
+  def testErrorOnHeartbeatWithNotExistingSession() {
+    afterClearDo {
+      eb.send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", "not-existing"), continueAfterErrorReply("UNKNOWN_SESSIONID") {
+        msg =>
+          tu.testComplete
+      })
+    }
   }
+
 }
