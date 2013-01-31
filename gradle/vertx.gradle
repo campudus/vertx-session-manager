@@ -69,7 +69,7 @@ class VertxPlugin implements Plugin<Project> {
 			description = 'Zips the Vert.x module.'
 			destinationDir = project.file("${project.buildDir}/packVertxModule")
 
-			archiveName = "${project.vertx.moduleName}.zip"
+			archiveName = "mod.zip"
 			from project.file("${project.buildDir}/prepareVertxModule")
 		}
 
@@ -83,7 +83,7 @@ class VertxPlugin implements Plugin<Project> {
 		project.task('module', type: Copy, dependsOn: 'packVertxModule') {
 			group = 'Vert.x'
 			description = 'Assembles the Vert.x module.'
-			destinationDir = project.file("${project.buildDir}/module")
+			destinationDir = project.file("${project.buildDir}/module/${project.vertx.moduleName}/")
 
 			from project.file('./README.md')
 			from project.tasks.packVertxModule.destinationDir
