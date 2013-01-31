@@ -28,8 +28,3 @@ vertx {
 	testTimeout = 30
 	showStandardStreams = true
 }
-
-test {
-	//makes the standard streams (err and out) visible at console when running tests
-	testLogging.showStandardStreams = true
-}

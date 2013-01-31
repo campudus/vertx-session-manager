@@ -17,6 +17,11 @@ class VertxPlugin implements Plugin<Project> {
 
 			addTasks(project)
 
+			// always rerun tests!!
+			project.test {
+				outputs.upToDateWhen { false }
+			}
+
 			Test vertxIntegration = project.task([type: Test, dependsOn: [
 					'prepareVertxModule',
 					'prepareVertxIntegration'
@@ -32,14 +37,15 @@ class VertxPlugin implements Plugin<Project> {
 				// Remove stuff we DO NOT need
 				classpath -= project.sourceSets.main.output
 
-				// FIXME lazily evaluate these:
-				testLogging.showStandardStreams = true
-
 				systemProperty 'vertx.test.timeout', project.vertx.testTimeout
 				systemProperty 'vertx.mods', project.file(project.vertx.modsDir)
 				systemProperty 'vertx.version', project.version
 				testLogging.showStandardStreams = project.vertx.showStandardStreams
+
+				outputs.upToDateWhen { false }
 			})
+
+			project.tasks.findByName("check").dependsOn vertxIntegration
 		}
 	}
 
