@@ -16,30 +16,31 @@
 
 package com.campudus.vertx.sessionmanager
 
-import java.util.concurrent.ConcurrentMap
-import java.util.UUID
-import org.vertx.java.core.eventbus.Message
-import org.vertx.java.core.json.JsonObject
+import org.vertx.java.core.AsyncResult
+import org.vertx.java.core.AsyncResultHandler
 import org.vertx.java.core.Handler
-import org.vertx.java.deploy.Verticle
+import org.vertx.java.core.eventbus.Message
 import org.vertx.java.core.json.JsonArray
-import org.vertx.java.core.logging.Logger
+import org.vertx.java.core.json.JsonObject
+import org.vertx.java.deploy.Verticle
 
 /**
  * Session Manager Module for Vert.x
  * <p>Please see README.md for full documentation.
  * @author <a href="http://www.campudus.com/">Joern Bernhardt</a>
+ * @author <a href="http://www.campudus.com/">Maximilian Stemplinger</a>
  */
-class SessionManager extends Verticle with Handler[Message[JsonObject]] {
+class SessionManager extends Verticle with Handler[Message[JsonObject]] with VertxScalaHelpers {
 
   private val defaultAddress = "campudus.session"
   private val defaultTimeout: Long = 30 * 60 * 1000 // 30 minutes
   private val defaultSessionClientPrefix = "campudus.session."
-  private var sharedSessions: ConcurrentMap[String, String] = null
-  private var sharedSessionTimeouts: ConcurrentMap[String, String] = null
   private var configTimeout = defaultTimeout
   private var cleanupAddress: String = null
   private var sessionClientPrefix: String = null
+  private var mongoCollection: JsonObject = null
+
+  private var sessionStore: SessionManagerDatabase = null
 
   override def start() {
     val config = container.getConfig()
@@ -48,55 +49,55 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
     configTimeout = if (timeout != null) timeout.longValue else configTimeout
     cleanupAddress = config.getString("cleaner")
     sessionClientPrefix = config.getString("prefix", defaultSessionClientPrefix)
+    mongoCollection = config.getObject("mongo-sessions", null)
 
-    sharedSessions = vertx.sharedData.getMap(config.getString("map-sessions", "com.campudus.vertx.sessionmanager.sessions"))
-    sharedSessionTimeouts = vertx.sharedData.getMap(config.getString("map-timeouts", "com.campudus.vertx.sessionmanager.timeouts"))
+    if (mongoCollection == null) {
+      sessionStore = new SharedDataSessionStore(vertx, this, config.getString("map-sessions", "com.campudus.vertx.sessionmanager.sessions"), config.getString("map-timeouts", "com.campudus.vertx.sessionmanager.timeouts"))
+    } else {
+      throw new Exception("mongodb not implemented yet")
+    }
+
   }
 
-  private def createTimer(sessionId: String, timeout: Long) = {
-    vertx.setTimer(timeout, new Handler[java.lang.Long]() {
+  private def replyMessage[T](success: JsonObject)(implicit message: Message[JsonObject], result: AsyncResult[T]): Unit = replyMessage(success, json)(message, result)
+  private def replyMessage[T](success: JsonObject, fail: JsonObject)(implicit message: Message[JsonObject], result: AsyncResult[T]): Unit = if (result.succeeded()) {
+    message.reply(success)
+  } else {
+    result.exception match {
+      case e: SessionException =>
+        message.reply(fail.putString("status", "error").putString("error", e.errorId).putString("message", result.exception.getMessage()))
+      case e =>
+        message.reply(fail.putString("status", "error").putString("error", "SESSIONSTORE_ERROR").putString("message", result.exception.getMessage()))
+    }
+  }
+
+  def createTimer(sessionId: String) = {
+    vertx.setTimer(configTimeout, new Handler[java.lang.Long]() {
       def handle(timerId: java.lang.Long) {
         destroySession(sessionId, "SESSION_TIMEOUT")
       }
     })
   }
 
-  private def resetTimer(sessionId: String) = {
-    sharedSessionTimeouts.get(sessionId) match {
-      case null =>
-        false
-      case timerId =>
-        if (sharedSessionTimeouts.replace(sessionId, timerId, createTimer(sessionId, configTimeout).toString)) {
-          vertx.cancelTimer(timerId.toLong)
+  def destroySession(sessionId: String, cause: String = "SESSION_KILL", resultHandler: AsyncResultHandler[JsonObject] = null) {
+    vertx.eventBus.send(sessionClientPrefix + sessionId, json.putString("status", "error").putString("error", cause).putString("message", "This session was killed."));
+    sessionStore.removeSession(sessionId, {
+      res: AsyncResult[JsonObject] =>
+        if (res.succeeded() && cleanupAddress != null) {
+          vertx.eventBus.send(cleanupAddress, json.putString("sessionId", sessionId)
+            .putObject("session", res.result))
         } else {
-          false
+          container.getLogger().warn("Could not remove session " + sessionId, res.exception)
         }
-    }
+
+        if (resultHandler != null) {
+          resultHandler.handle(res)
+        }
+    })
   }
 
-  private def destroySession(sessionId: String, cause: String) {
-    vertx.eventBus.send(sessionClientPrefix + sessionId, new JsonObject().putString("status", "error").putString("error", cause));
-    if (cleanupAddress != null) {
-      val sessionString = sharedSessions.remove(sessionId)
-      vertx.eventBus.send(cleanupAddress, new JsonObject().putString("sessionId", sessionId)
-        .putObject("session", new JsonObject(sessionString)))
-    } else {
-      sharedSessions.remove(sessionId)
-    }
-    vertx.cancelTimer(sharedSessionTimeouts.remove(sessionId).toLong)
-  }
-
-  private def getSession(sessionId: String) = {
-    sharedSessions.get(sessionId) match {
-      case null => null
-      case session =>
-        // session is still in use, change timeout
-        resetTimer(sessionId)
-        session
-    }
-  }
-
-  override def handle(message: Message[JsonObject]) {
+  override def handle(msg: Message[JsonObject]) {
+    implicit val message = msg
     message.body.getField("action") match {
       case "get" => message.body.getField("sessionId") match {
         case null => message.reply(createJsonError("SESSIONID_MISSING", "Cannot get data from session: sessionId parameter is missing."))
@@ -111,26 +112,10 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
             }
           }
 
-          getSession(sessionId) match {
-            case null =>
-              message.reply(raiseJsonError(sessionId, "SESSION_GONE", "Cannot get data from session '" + sessionId + "'. Session is gone."))
-            case sessionString =>
-              val session = new JsonObject(sessionString)
-              val result = new JsonObject
-              for (key <- fields.toArray) {
-                session.getField(key.toString) match {
-                  case null => container.getLogger.warn("field " + key + " is null") // Do not put into result
-                  case elem: JsonArray => result.putArray(key.toString, elem)
-                  case elem: Array[Byte] => result.putBinary(key.toString, elem)
-                  case elem: java.lang.Boolean => result.putBoolean(key.toString, elem)
-                  case elem: Number => result.putNumber(key.toString, elem)
-                  case elem: JsonObject => result.putObject(key.toString, elem)
-                  case elem: String => result.putString(key.toString, elem)
-                  case unknownType => container.getLogger.warn("Unknown type: " + null)
-                }
-              }
-              message.reply(new JsonObject().putObject("data", result))
-          }
+          sessionStore.getSessionData(sessionId, fields, {
+            implicit res: AsyncResult[JsonObject] =>
+              replyMessage(res.result)
+          })
         case unknownSessionIdType => message.reply(createJsonError("WRONG_DATA_TYPE", "Cannot get data from session: 'sessionId' has to be a String."))
       }
 
@@ -139,15 +124,10 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
         case sessionId: String => message.body.getField("data") match {
           case null => message.reply(createJsonError("DATA_MISSING", "Cannot put data in session '" + sessionId + "': data is missing."))
           case data: JsonObject =>
-            getSession(sessionId) match {
-              case null => message.reply(raiseJsonError(sessionId, "SESSION_GONE", "Cannot put data in session '" + sessionId + "': Session is gone."))
-              case sessionString =>
-                val session = new JsonObject(sessionString)
-                session.mergeIn(data)
-                sharedSessions.put(sessionId, session.encode)
-
-                message.reply(new JsonObject().putBoolean("sessionSaved", true))
-            }
+            sessionStore.putSession(sessionId, data, {
+              implicit res: AsyncResult[Boolean] =>
+                replyMessage(json.putBoolean("sessionSaved", true))
+            })
           case unknownType =>
             message.reply(createJsonError("WRONG_DATA_TYPE", "Cannot put data in session: 'data' has to be a JsonObject."))
         }
@@ -156,18 +136,18 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
       }
 
       case "start" =>
-        val sessionId = startSession()
-        message.reply(new JsonObject().putString("sessionId", sessionId))
+        sessionStore.startSession({ implicit res: AsyncResult[String] =>
+          replyMessage(json.putString("sessionId", res.result))
+        })
 
       case "heartbeat" =>
         message.body.getField("sessionId") match {
           case null => message.reply(createJsonError("SESSIONID_MISSING", "No usable heartbeat: sessionId missing!"))
           case sessionId: String =>
-            if (resetTimer(sessionId)) {
-              message.reply(new JsonObject().putNumber("timeout", configTimeout))
-            } else {
-              message.reply(createJsonError("UNKNOWN_SESSIONID", "Heartbeat failed - no timeout/session found with sessionId " + sessionId))
-            }
+            sessionStore.resetTimer(sessionId, {
+              implicit res: AsyncResult[Boolean] =>
+                replyMessage(json.putNumber("timeout", configTimeout))
+            })
           case unknownSessionIdType =>
             message.reply(createJsonError("WRONG_DATA_TYPE", "Cannot send heartbeat: 'sessionId' has to be a String."))
         }
@@ -176,31 +156,28 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
         message.body.getField("sessionId") match {
           case null => message.reply(createJsonError("SESSIONID_MISSING", "Cannot destroy session, sessionId missing!"))
           case sessionId: String =>
-            destroySession(sessionId, "SESSION_KILL")
-            message.reply(new JsonObject().putBoolean("sessionDestroyed", true))
+            destroySession(sessionId, "SESSION_KILL", { implicit result: AsyncResult[JsonObject] =>
+              replyMessage(json.putBoolean("sessionDestroyed", true), json.putBoolean("sessionDestroyed", false))
+            })
           case unknownSessionIdType =>
             message.reply(createJsonError("WRONG_DATA_TYPE", "Cannot destroy session: 'sessionId' has to be a String."))
         }
 
       case "status" =>
-        import scala.collection.JavaConversions._
         // TODO more reports for the administrator
         message.body.getString("report") match {
           case "connections" =>
-            message.reply(new JsonObject().putNumber("openSessions", sharedSessions.size))
+            sessionStore.getOpenSessions({ implicit res: AsyncResult[Long] =>
+              replyMessage(json.putNumber("openSessions", res.result))
+            })
           case "matches" =>
             message.body.getField("data") match {
               case null =>
                 message.reply(createJsonError("DATA_MISSING", "You have to specify 'data' as a JsonObject to match the sessions on."))
               case data: JsonObject =>
-                val sessionsArray = new JsonArray()
-                for ((id, sessionString) <- sharedSessions) {
-                  val sessionData = new JsonObject(sessionString)
-                  if (sessionData.copy.mergeIn(data) == sessionData) {
-                    sessionsArray.addObject(sessionData.putString("sessionId", id))
-                  }
-                }
-                message.reply(new JsonObject().putBoolean("matches", sessionsArray.size > 0).putArray("sessions", sessionsArray))
+                sessionStore.getMatches(data, { implicit result: AsyncResult[JsonArray] =>
+                  replyMessage(json.putBoolean("matches", result.result.size > 0).putArray("sessions", result.result))
+                })
               case unknownDataType =>
                 message.reply(createJsonError("WRONG_DATA_TYPE", "Cannot match on data: 'data' has to be a JsonObject."))
             }
@@ -209,11 +186,9 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
         }
 
       case "clear" =>
-        import scala.collection.JavaConversions._
-        for ((sessionId, sessionString) <- sharedSessions) {
-          destroySession(sessionId, "SESSION_KILL")
-        }
-        message.reply(new JsonObject().putBoolean("cleared", true))
+        sessionStore.clearAllSessions(fnToAsyncHandler({ implicit result: AsyncResult[Boolean] =>
+          replyMessage(json.putBoolean("cleared", true), json.putBoolean("cleared", false))
+        }))
 
       case unknown => message.reply(createJsonError("UNKNOWN_COMMAND", "Session manager does not understand action '" + unknown + "'."))
     }
@@ -227,19 +202,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] {
     val errorJson = createJsonError(error, message)
     vertx.eventBus.send(sessionClientPrefix + sessionId, errorJson)
     errorJson
-  }
-
-  private def startSession(): String = {
-    val sessionId = UUID.randomUUID.toString
-    sharedSessions.putIfAbsent(sessionId, "{}") match {
-      case null =>
-        sharedSessionTimeouts.put(sessionId, createTimer(sessionId, configTimeout).toString)
-        // There is no session with this uuid -> return it
-        sessionId
-      case anotherSessionId =>
-        // There was a session with this uuid -> create a new one
-        startSession
-    }
   }
 
 }

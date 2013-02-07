@@ -10,42 +10,41 @@ import org.vertx.java.core.json.JsonObject
 import org.vertx.java.testframework.TestClientBase
 import org.junit.runner.RunWith
 
-object SessionManagerTestClient {
-  val VERSION = "1.1.1"
-  val sessionClientPrefix: String = "session."
-  val cleanupAddress: String = "sessioncleaner"
-  val defaultTimeout: Long = 5000
-  val noTimeoutTest: Long = 3500
-  val timeoutTest: Long = 10000
-}
-
 class SessionManagerTestClient extends TestClientBase {
-  import SessionManagerTestClient._
-
-  val smAddress = "sessions"
 
   val someData = new JsonObject()
     .putObject("object1", new JsonObject().putString("key1", "something").putNumber("key2", 15))
     .putObject("object2", new JsonObject().putString("key1", "another thing").putNumber("key2", 16))
     .putString("teststring", "ok")
     .putNumber("answer", 42)
+    
+  var config: JsonObject = null
+  var smAddress: String = null
+  var cleanupAddress: String = null
+  var defaultTimeout: Int = 5000
+  var sessionClientPrefix: String = null
+  var noTimeoutTest: Int = 3500
+  var timeoutTest: Int = 10000
 
   var eb: EventBus = null
 
   override def start() {
     super.start()
     eb = vertx.eventBus()
-    val config = new JsonObject()
-    config.putString("address", smAddress)
-    config.putString("cleaner", cleanupAddress)
-    config.putNumber("timeout", defaultTimeout)
-    config.putString("prefix", sessionClientPrefix)
+
+    config = container.getConfig()
+    smAddress = config.getObject("sessionManagerConfig").getString("address")
+    cleanupAddress = config.getObject("sessionManagerConfig").getString("cleaner")
+    defaultTimeout = config.getNumber("defaultTimeout").intValue()
+    sessionClientPrefix = config.getObject("sessionManagerConfig").getString("prefix")
+    noTimeoutTest = config.getNumber("noTimeoutTest").intValue()
+    timeoutTest = config.getNumber("timeoutTest").intValue()
 
     container.deployModule("com.campudus.session-manager-v" +
       (System.getProperty("vertx.version") match {
-        case null => VERSION
+        case null => config.getString("version")
         case sth => sth
-      }), config, 1, new Handler[java.lang.String] {
+      }), config.getObject("sessionManagerConfig"), 1, new Handler[java.lang.String] {
       def handle(res: String) {
         tu.appReady();
       }

@@ -8,7 +8,9 @@ The latest version of this module can be found in the [campudus/vertx-session-ma
 
 This module requires the scala language module (org.scala-lang.scala-library-v2.9.2) to work. It is built against Vert.x 1.3.1.
 
-It uses SharedData maps provided by Vert.x to save its information.
+It uses either SharedData maps provided by Vert.x or a MongoDB to save its information, depending on your configuration (see below).
+
+If you want to use MongoDB, the [Vert.x MongoDB Persistor](https://github.com/vert-x/mod-mongo-persistor) is required.
 
 ## Name
 
@@ -23,8 +25,12 @@ The session manager module takes the following configuration:
         "timeout": <timeout>,
         "cleaner": <cleanerAddress>,
         "prefix": <prefix>,
+        "map-timeouts": <sharedMap>,
         "map-sessions": <sharedMap>,
-        "map-timeouts": <sharedMap>
+        "mongo-sessions": {
+            "mongo-address": <mongoAddress>,
+            "collection-name": <collection-name>
+        }
     }
 
 For example:
@@ -41,8 +47,11 @@ A short description about each field:
 * `timeout` How long sessions should be stored. If a timeout occurs, the session will be deleted and is not available anymore. The timeout is set as a long value in milliseconds. Defaults to `30 * 60 * 1000`, i.e. 30 Minutes.
 * `cleaner` As soon as a session gets destroyed, it will be sent to this address. This is useful for cleanup purposes. Since you can only store basic information in the session like a shopping-cart id, you can delete the shopping-cart in your database with the provided session, for example. If the cleaner address is null, the session won't be sent anywhere. Defaults to `null`.
 * `prefix` An address prefix where clients can listen on with their session id. If their session timed out or got killed, they will receive a message on `<prefix><sessionId>`. Defaults to `campudus.sessions.`
-* `map-sessions` The name of the shared map to be used for the session storage. Defaults to `com.campudus.vertx.sessionmanager.sessions`.
 * `map-timeouts` The name of the shared map to be used to save timer-ids. Defaults to `com.campudus.vertx.sessionmanager.timeouts`.
+* `map-sessions` The name of the shared map to be used for the session storage. Defaults to `com.campudus.vertx.sessionmanager.sessions`.
+* `mongo-sessions` The configuration, when using MongoDB. If this is set, the session manager won't use SharedData and just use the MongoDB.
+    * `mongo-address`:  The main address of the MongoDB Persistor.
+    * `collection-name`:  The name of the collection, in which the session data should be stored.
 
 ## Operations
 
