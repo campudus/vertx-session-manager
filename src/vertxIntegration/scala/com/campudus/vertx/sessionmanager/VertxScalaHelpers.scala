@@ -10,7 +10,7 @@ trait VertxScalaHelpers {
   }
 
   implicit def noParameterFunctionToSimpleHandler(fn: () => Any): Handler[Void] = new Handler[Void]() {
-    override def handle(v: Void) = fn
+    override def handle(v: Void) = fn()
   }
 
   implicit def fnToAsyncHandler[T](fn: AsyncResult[T] => Any): AsyncResultHandler[T] = new AsyncResultHandler[T]() {
