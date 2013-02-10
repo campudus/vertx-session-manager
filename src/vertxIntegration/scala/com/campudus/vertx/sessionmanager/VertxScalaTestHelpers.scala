@@ -1,11 +1,11 @@
 package com.campudus.vertx.sessionmanager
 
 import org.vertx.java.core.AsyncResult
+import org.vertx.java.core.Handler
 import org.vertx.java.core.json.JsonObject
 import org.vertx.java.core.AsyncResultHandler
-import org.vertx.java.core.Handler
 
-trait VertxScalaHelpers {
+trait VertxScalaTestHelpers {
 
   def json = new JsonObject
 
@@ -24,4 +24,4 @@ trait VertxScalaHelpers {
   }
 }
 
-object VertxScalaHelpers extends VertxScalaHelpers
+object VertxScalaTestHelpers extends VertxScalaTestHelpers

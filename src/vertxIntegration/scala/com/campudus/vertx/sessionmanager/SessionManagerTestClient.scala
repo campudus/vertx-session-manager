@@ -2,22 +2,21 @@ package com.campudus.vertx.sessionmanager
 
 import scala.actors.threadpool.AtomicInteger
 import scala.collection.JavaConversions.iterableAsScalaIterable
-import org.vertx.java.core.Handler
 import org.vertx.java.core.eventbus.EventBus
 import org.vertx.java.core.eventbus.Message
 import org.vertx.java.core.json.JsonArray
 import org.vertx.java.core.json.JsonObject
 import org.vertx.java.testframework.TestClientBase
-import org.junit.runner.RunWith
+import org.vertx.java.core.Handler
 
-class SessionManagerTestClient extends TestClientBase {
+class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers {
 
   val someData = new JsonObject()
     .putObject("object1", new JsonObject().putString("key1", "something").putNumber("key2", 15))
     .putObject("object2", new JsonObject().putString("key1", "another thing").putNumber("key2", 16))
     .putString("teststring", "ok")
     .putNumber("answer", 42)
-    
+
   var config: JsonObject = null
   var smAddress: String = null
   var cleanupAddress: String = null
@@ -40,6 +39,17 @@ class SessionManagerTestClient extends TestClientBase {
     noTimeoutTest = config.getNumber("noTimeoutTest").intValue()
     timeoutTest = config.getNumber("timeoutTest").intValue()
 
+    if (config.getObject("sessionManagerConfig").getObject("mongo-sessions") != null) {
+      container.deployModule("vertx.mongo-persistor-v1.2", config.getObject("mongoConfig"), 1, {
+        res: String =>
+          startSessionManager
+      })
+    } else {
+      startSessionManager
+    }
+  }
+
+  private def startSessionManager: Unit = {
     container.deployModule("com.campudus.session-manager-v" +
       (System.getProperty("vertx.version") match {
         case null => config.getString("version")
@@ -58,7 +68,7 @@ class SessionManagerTestClient extends TestClientBase {
   private def continueAfterNoErrorReply(fn: (Message[JsonObject]) => Unit) = new Handler[Message[JsonObject]]() {
     override def handle(msg: Message[JsonObject]) = msg.body.getString("error") match {
       case null => fn(msg)
-      case str => tu.azzert(false, "Should not get an error, but got: " + str)
+      case str => tu.azzert(false, "Should not get an error, but got: " + str + " - " + msg.body.getString("message"))
     }
   }
 
@@ -88,6 +98,7 @@ class SessionManagerTestClient extends TestClientBase {
 
     eb.send(smAddress, json, continueAfterNoErrorReply {
       msg =>
+        tu.azzert(msg.body.getString("sessionId") != null, "sessionId should be a string after create, but is null.")
         after(msg.body.getString("sessionId"))
     })
   }
@@ -143,8 +154,8 @@ class SessionManagerTestClient extends TestClientBase {
                 val data = msgAfterGet.body.getObject("data")
                 tu.azzert(data != null, "Should receive data, but got null")
                 val object1 = data.getObject("object1")
-                tu.azzert("something" == object1.getString("key1"), "Should have gotten something out of data, but got " + data.getString("key1"))
-                tu.azzert(15 == object1.getNumber("key2").intValue, "Should have gotten 15 out of data, but got " + data.getNumber("key2"))
+                tu.azzert("something" == object1.getString("key1"), "Should have gotten something out of data, but got " + object1.getString("key1"))
+                tu.azzert(15 == object1.getNumber("key2").intValue, "Should have gotten 15 out of data, but got " + object1.getNumber("key2"))
                 val object2 = data.getObject("object2")
                 tu.azzert("another thing" == object2.getString("key1"), "Should have gotten another thing out of data, but got " + object2.getString("key1"))
                 tu.azzert(16 == object2.getNumber("key2").intValue, "Should have gotten 16 out of data, but got " + object2.getNumber("key2"))
@@ -474,19 +485,6 @@ class SessionManagerTestClient extends TestClientBase {
 
   def testConnectionsReport() {
     afterClearDo {
-      val testCount = 2
-      val testsRun = new AtomicInteger(0)
-
-      // No open sessions after clear?
-      afterClearDo {
-        eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"), continueAfterNoErrorReply {
-          msgAfterStatus =>
-            tu.azzert(msgAfterStatus.body.getNumber("openSessions", 1000) == 0, "There shouldn't be any open sessions anymore!")
-            if (testsRun.incrementAndGet == testCount) {
-              tu.testComplete
-            }
-        })
-      }
 
       eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"),
         continueAfterNoErrorReply {
@@ -505,8 +503,15 @@ class SessionManagerTestClient extends TestClientBase {
                         if (numberOfTest == asynchTestCount) {
                           val openSessions = openSessionsMsg.body.getNumber("openSessions").intValue
                           tu.azzert(openSessions >= asynchTestCount, "There should be at least " + asynchTestCount + " open sessions.")
-                          if (testsRun.incrementAndGet == testCount) {
-                            tu.testComplete
+
+                          // No open sessions after clear?
+                          afterClearDo {
+                            eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"), continueAfterNoErrorReply {
+                              msgAfterStatus =>
+                                val openSessions = msgAfterStatus.body.getNumber("openSessions", 1000)
+                                tu.azzert(openSessions == 0, "There shouldn't be any open sessions anymore, but got " + openSessions)
+                                tu.testComplete
+                            })
                           }
                         }
                     })
@@ -557,7 +562,7 @@ class SessionManagerTestClient extends TestClientBase {
       var unregisterIt = { () => }
       val handler = new Handler[Message[JsonObject]]() {
         def handle(msg: Message[JsonObject]) {
-          tu.azzert(msg.body.getObject("session") != null, "Should get a real session for cleanup!")
+          tu.azzert(msg.body.getObject("session") != null, "Should get a real session for cleanup, but got " + msg.body.encode)
           msg.body.getObject("session") match {
             case session =>
               tu.azzert(msg.body.getString("sessionId") != null, "should have a sessionId")
@@ -645,7 +650,7 @@ class SessionManagerTestClient extends TestClientBase {
 
   def testHeartbeatSession() {
     afterClearDo {
-      afterPutDo {
+      afterPutAndGetDo {
         sessionId =>
           Thread.sleep(noTimeoutTest)
           eb.send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", sessionId),

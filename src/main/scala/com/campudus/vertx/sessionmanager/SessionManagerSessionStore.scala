@@ -5,7 +5,7 @@ import org.vertx.java.core.Vertx
 import org.vertx.java.core.json.JsonArray
 import org.vertx.java.core.AsyncResultHandler
 
-abstract class SessionManagerDatabase {
+abstract class SessionManagerSessionStore {
 
   def clearAllSessions(resultHandler: AsyncResultHandler[Boolean]): Unit
 
@@ -17,9 +17,9 @@ abstract class SessionManagerDatabase {
 
   def putSession(sessionId: String, session: JsonObject, resultHandler: AsyncResultHandler[Boolean]): Unit
 
-  def removeSession(sessionId: String, resultHandler: AsyncResultHandler[JsonObject]): Unit
+  def removeSession(sessionId: String, timerId: Option[Long], resultHandler: AsyncResultHandler[JsonObject]): Unit
 
-  def resetTimer(sessionId: String, resultHandler: AsyncResultHandler[Boolean]): Unit
+  def resetTimer(sessionId: String, newTimerId: Long, resultHandler: AsyncResultHandler[Long]): Unit
 
   def startSession(resultHandler: AsyncResultHandler[String]): Unit
 

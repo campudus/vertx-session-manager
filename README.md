@@ -28,7 +28,7 @@ The session manager module takes the following configuration:
         "map-timeouts": <sharedMap>,
         "map-sessions": <sharedMap>,
         "mongo-sessions": {
-            "mongo-address": <mongoAddress>,
+            "address": <mongoAddress>,
             "collection-name": <collection-name>
         }
     }
@@ -50,8 +50,8 @@ A short description about each field:
 * `map-timeouts` The name of the shared map to be used to save timer-ids. Defaults to `com.campudus.vertx.sessionmanager.timeouts`.
 * `map-sessions` The name of the shared map to be used for the session storage. Defaults to `com.campudus.vertx.sessionmanager.sessions`.
 * `mongo-sessions` The configuration, when using MongoDB. If this is set, the session manager won't use SharedData and just use the MongoDB.
-    * `mongo-address`:  The main address of the MongoDB Persistor.
-    * `collection-name`:  The name of the collection, in which the session data should be stored.
+    * `address`:  The main address of the MongoDB Persistor.
+    * `collection`:  The name of the collection, in which the session data should be stored.
 
 ## Operations
 
