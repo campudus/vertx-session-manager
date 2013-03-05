@@ -1,6 +1,5 @@
 package com.campudus.vertx.sessionmanager
 
-import scala.actors.threadpool.AtomicInteger
 import scala.collection.JavaConversions.iterableAsScalaIterable
 import org.vertx.java.core.eventbus.EventBus
 import org.vertx.java.core.eventbus.Message
@@ -8,6 +7,7 @@ import org.vertx.java.core.json.JsonArray
 import org.vertx.java.core.json.JsonObject
 import org.vertx.java.testframework.TestClientBase
 import org.vertx.java.core.Handler
+import java.util.concurrent.atomic.AtomicInteger
 
 class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers {
 
