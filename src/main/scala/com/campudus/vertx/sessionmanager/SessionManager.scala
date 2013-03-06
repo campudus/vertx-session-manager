@@ -69,7 +69,7 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] with Ver
 
   private def replyMessage[T](success: JsonObject)(implicit message: Message[JsonObject], result: AsyncResult[T]): Unit = replyMessage(success, json)(message, result)
   private def replyMessage[T](success: JsonObject, fail: JsonObject)(implicit message: Message[JsonObject], result: AsyncResult[T]): Unit = if (result.succeeded()) {
-    message.reply(success)
+    message.reply(success.putString("status", "ok"))
   } else {
     result.exception match {
       case e: SessionException =>

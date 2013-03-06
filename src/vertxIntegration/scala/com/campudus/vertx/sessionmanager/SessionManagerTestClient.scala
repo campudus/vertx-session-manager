@@ -66,15 +66,16 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
   }
 
   private def continueAfterNoErrorReply(fn: (Message[JsonObject]) => Unit) = new Handler[Message[JsonObject]]() {
-    override def handle(msg: Message[JsonObject]) = msg.body.getString("error") match {
-      case null => fn(msg)
-      case str => tu.azzert(false, "Should not get an error, but got: " + str + " - " + msg.body.getString("message"))
+    override def handle(msg: Message[JsonObject]) = msg.body.getString("status") match {
+      case "ok" => fn(msg)
+      case "error" => tu.azzert(false, "Should not get an error, but got: " + msg.body.getString("error") + " - " + msg.body.getString("message"))
+      case str => tu.azzert(false, "Should get an ok status, but got different status: " + str)
     }
   }
 
   private def continueAfterErrorReply(error: String)(fn: (Message[JsonObject]) => Unit) = new Handler[Message[JsonObject]]() {
     override def handle(msg: Message[JsonObject]) = msg.body.getString("status") match {
-      case null => tu.azzert(false, "Should get an error, but got no error! " + msg.body.encode)
+      case "ok" => tu.azzert(false, "Should get an error, but got ok! " + msg.body.encode)
       case "error" =>
         if (error != null) {
           tu.azzert(error == msg.body.getString("error"), error + " does not equal " + msg.body.getString("error"))

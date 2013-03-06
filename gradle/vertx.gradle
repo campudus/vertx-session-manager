@@ -53,7 +53,7 @@ class VertxPlugin implements Plugin<Project> {
 		project.task('prepareVertxModule', type: Copy, dependsOn: 'classes') {
 			group = 'Vert.x'
 			description = 'Prepares the module for packaging'
-			destinationDir = project.file("${project.buildDir}/prepareVertxModule")
+			destinationDir = project.file("${project.buildDir}/prepareVertxModule/${project.vertx.moduleName}")
 
 			from project.sourceSets.main.output.classesDir
 			from project.sourceSets.main.output.resourcesDir
