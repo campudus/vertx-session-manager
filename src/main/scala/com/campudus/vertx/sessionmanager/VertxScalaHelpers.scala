@@ -17,8 +17,6 @@ trait VertxScalaHelpers {
     override def handle(v: Void) = fn()
   }
 
-  implicit def somethingToAsyncResult[T](something: T): AsyncResult[T] = new AsyncResult(something)
-
   implicit def fnToAsyncHandler[T](fn: AsyncResult[T] => Any): AsyncResultHandler[T] = new AsyncResultHandler[T]() {
     override def handle(result: AsyncResult[T]) = fn(result)
   }

@@ -1,26 +1,25 @@
 package com.campudus.vertx.sessionmanager
 
-import org.vertx.java.core.json.JsonObject
-import org.vertx.java.core.Vertx
-import org.vertx.java.core.json.JsonArray
-import org.vertx.java.core.AsyncResultHandler
+import scala.concurrent.Future
+
+import org.vertx.java.core.json.{ JsonArray, JsonObject }
 
 abstract class SessionManagerSessionStore {
 
-  def clearAllSessions(resultHandler: AsyncResultHandler[Boolean]): Unit
+  def clearAllSessions(): Future[Boolean]
 
-  def getOpenSessions(resultHandler: AsyncResultHandler[Long]): Unit
+  def getOpenSessions(): Future[Long]
 
-  def getMatches(data: JsonObject, resultHandler: AsyncResultHandler[JsonArray]): Unit
+  def getMatches(data: JsonObject): Future[JsonArray]
 
-  def getSessionData(sessionId: String, fields: JsonArray, resultHandler: AsyncResultHandler[JsonObject]): Unit
+  def getSessionData(sessionId: String, fields: JsonArray): Future[JsonObject]
 
-  def putSession(sessionId: String, session: JsonObject, resultHandler: AsyncResultHandler[Boolean]): Unit
+  def putSession(sessionId: String, session: JsonObject): Future[Boolean]
 
-  def removeSession(sessionId: String, timerId: Option[Long], resultHandler: AsyncResultHandler[JsonObject]): Unit
+  def removeSession(sessionId: String, timerId: Option[Long]): Future[JsonObject]
 
-  def resetTimer(sessionId: String, newTimerId: Long, resultHandler: AsyncResultHandler[Long]): Unit
+  def resetTimer(sessionId: String, newTimerId: Long): Future[Long]
 
-  def startSession(resultHandler: AsyncResultHandler[String]): Unit
+  def startSession(): Future[String]
 
 }

@@ -1,95 +1,96 @@
 package com.campudus.vertx.sessionmanager
 
-import scala.collection.JavaConversions.iterableAsScalaIterable
-import org.vertx.java.core.eventbus.EventBus
+import org.vertx.testtools.TestVerticle
+import org.vertx.testtools.VertxAssert._
+import org.vertx.java.core.json.JsonObject
+import org.vertx.java.core.AsyncResultHandler
+import org.vertx.java.core.AsyncResult
+import scala.concurrent.Future
 import org.vertx.java.core.eventbus.Message
 import org.vertx.java.core.json.JsonArray
-import org.vertx.java.core.json.JsonObject
-import org.vertx.java.testframework.TestClientBase
-import org.vertx.java.core.Handler
 import java.util.concurrent.atomic.AtomicInteger
+import org.junit.Test
+import org.vertx.java.core.Handler
 
-class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers {
+abstract class SessionManagerBaseTestClient extends TestVerticle with VertxScalaHelpers {
+  import com.campudus.vertx.DefaultVertxExecutionContext.global
 
-  val someData = new JsonObject()
+  val smAddress = "sessions"
+  val cleanupAddress = "sessioncleaner"
+  val defaultTimeout = 5000
+  val noTimeoutTest = 3500
+  val timeoutTest = 10000
+  val sessionClientPrefix = "session."
+
+  val config = new JsonObject()
+  config.putNumber("defaultTimeout", defaultTimeout)
+  config.putNumber("noTimeoutTest", noTimeoutTest)
+  config.putNumber("timeoutTest", timeoutTest)
+
+  val sessionManagerConfig = new JsonObject()
+  sessionManagerConfig.putString("address", smAddress)
+  sessionManagerConfig.putString("cleaner", cleanupAddress)
+  sessionManagerConfig.putNumber("timeout", defaultTimeout)
+  sessionManagerConfig.putString("prefix", sessionClientPrefix)
+  config.putObject("sessionManagerConfig", sessionManagerConfig)
+
+  private val someData = new JsonObject()
     .putObject("object1", new JsonObject().putString("key1", "something").putNumber("key2", 15))
     .putObject("object2", new JsonObject().putString("key1", "another thing").putNumber("key2", 16))
     .putString("teststring", "ok")
     .putNumber("answer", 42)
 
-  var config: JsonObject = null
-  var smAddress: String = null
-  var cleanupAddress: String = null
-  var defaultTimeout: Int = 5000
-  var sessionClientPrefix: String = null
-  var noTimeoutTest: Int = 3500
-  var timeoutTest: Int = 10000
-
-  var eb: EventBus = null
-
-  override def start() {
-    super.start()
-    eb = vertx.eventBus()
-
-    config = container.getConfig()
-    smAddress = config.getObject("sessionManagerConfig").getString("address")
-    cleanupAddress = config.getObject("sessionManagerConfig").getString("cleaner")
-    defaultTimeout = config.getNumber("defaultTimeout").intValue()
-    sessionClientPrefix = config.getObject("sessionManagerConfig").getString("prefix")
-    noTimeoutTest = config.getNumber("noTimeoutTest").intValue()
-    timeoutTest = config.getNumber("timeoutTest").intValue()
-
-    if (config.getObject("sessionManagerConfig").getObject("mongo-sessions") != null) {
-      container.deployModule("vertx.mongo-persistor-v1.2", config.getObject("mongoConfig"), 1, {
-        res: String =>
-          startSessionManager
-      })
-    } else {
-      startSessionManager
-    }
-  }
-
-  private def startSessionManager: Unit = {
-    container.deployModule("com.campudus.session-manager-v" +
-      (System.getProperty("vertx.version") match {
-        case null => config.getString("version")
-        case sth => sth
-      }), config.getObject("sessionManagerConfig"), 1, new Handler[java.lang.String] {
-      def handle(res: String) {
-        tu.appReady();
-      }
+  private def deployAndStart() = {
+    // Deploy the module - the System property `vertx.modulename` will contain the name of the module so you
+    // don't have to hardcode it in your tests
+    container.deployModule(System.getProperty("vertx.modulename"), sessionManagerConfig, { asyncResult: AsyncResult[String] =>
+      // Deployment is asynchronous and this this handler will be called when it's complete (or failed)
+      assertTrue("should succeed with deployment", asyncResult.succeeded())
+      assertNotNull("deploymentID should not be null", asyncResult.result())
+      // If deployed correctly then start the tests!
+      startTests()
     })
   }
 
-  override def stop() {
-    super.stop();
+  override def start() {
+    // Make sure we call initialize() - this sets up the assert stuff so assert functionality works correctly
+    initialize()
+
+    setUp map (_ => deployAndStart())
   }
 
-  private def continueAfterNoErrorReply(fn: (Message[JsonObject]) => Unit) = new Handler[Message[JsonObject]]() {
-    override def handle(msg: Message[JsonObject]) = msg.body.getString("status") match {
+  /**
+   * Does some basic initialization.
+   *
+   * @return A future when the function is done.
+   */
+  protected def setUp(): Future[Unit]
+
+  private def continueAfterNoErrorReply(fn: (Message[JsonObject]) => Unit) = { msg: Message[JsonObject] =>
+    msg.body.getString("status") match {
       case "ok" => fn(msg)
-      case "error" => tu.azzert(false, "Should not get an error, but got: " + msg.body.getString("error") + " - " + msg.body.getString("message"))
-      case str => tu.azzert(false, "Should get an ok status, but got different status: " + str)
+      case "error" => fail("Should not get an error, but got: " + msg.body.getString("error") + " - " + msg.body.getString("message"))
+      case str => fail("Should get an ok status, but got different status: " + str)
     }
   }
 
-  private def continueAfterErrorReply(error: String)(fn: (Message[JsonObject]) => Unit) = new Handler[Message[JsonObject]]() {
-    override def handle(msg: Message[JsonObject]) = msg.body.getString("status") match {
-      case "ok" => tu.azzert(false, "Should get an error, but got ok! " + msg.body.encode)
+  private def continueAfterErrorReply(error: String)(fn: (Message[JsonObject]) => Unit) = { msg: Message[JsonObject] =>
+    msg.body.getString("status") match {
+      case "ok" => fail("Should get an error, but got ok! " + msg.body.encode)
       case "error" =>
         if (error != null) {
-          tu.azzert(error == msg.body.getString("error"), error + " does not equal " + msg.body.getString("error"))
+          assertEquals(error + " does not equal " + msg.body.getString("error"), error, msg.body.getString("error"))
         }
         fn(msg)
-      case str => tu.azzert(false, "Should get an error status, but got different status: " + str)
+      case str => fail("Should get an error status, but got different status: " + str)
     }
   }
 
   private def afterClearDo(after: => Unit) {
-    eb.send(smAddress, new JsonObject().putString("action", "clear"),
+    getVertx().eventBus().send(smAddress, json.putString("action", "clear"),
       continueAfterNoErrorReply {
         msg =>
-          tu.azzert(msg.body.getBoolean("cleared", false))
+          assertTrue(msg.body.getBoolean("cleared", false))
           after
       })
   }
@@ -97,15 +98,15 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
   private def afterCreateDo(after: String => Unit) {
     val json = new JsonObject().putString("action", "start")
 
-    eb.send(smAddress, json, continueAfterNoErrorReply {
+    getVertx().eventBus.send(smAddress, json, continueAfterNoErrorReply {
       msg =>
-        tu.azzert(msg.body.getString("sessionId") != null, "sessionId should be a string after create, but is null.")
+        assertNotNull("sessionId should be a string after create, but is null.", msg.body.getString("sessionId"))
         after(msg.body.getString("sessionId"))
     })
   }
 
   private def getSessionData(sessionId: String, fields: JsonArray)(after: JsonObject => Unit) {
-    eb.send(smAddress, new JsonObject().putString("action", "get")
+    getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "get")
       .putString("sessionId", sessionId)
       .putArray("fields", fields),
       continueAfterNoErrorReply {
@@ -117,13 +118,13 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
   private def afterPutDo(data: JsonObject)(after: String => Unit) {
     afterCreateDo {
       sessionId =>
-        eb.send(smAddress,
+        getVertx().eventBus().send(smAddress,
           new JsonObject().putString("action", "put")
             .putString("sessionId", sessionId)
             .putObject("data", data),
           continueAfterNoErrorReply {
             msgAfterPut =>
-              tu.azzert(msgAfterPut.body.getBoolean("sessionSaved", false), "Session should have been saved!")
+              assertTrue("Session should have been saved!", msgAfterPut.body.getBoolean("sessionSaved", false))
               after(sessionId)
           })
     }
@@ -141,7 +142,7 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
           val asynchTestCount = 2
 
           // Get the saved stuff again
-          eb.send(smAddress,
+          getVertx().eventBus().send(smAddress,
             new JsonObject().putString("action", "get")
               .putString("sessionId", sessionId)
               .putArray("fields",
@@ -153,19 +154,19 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
             continueAfterNoErrorReply {
               msgAfterGet =>
                 val data = msgAfterGet.body.getObject("data")
-                tu.azzert(data != null, "Should receive data, but got null")
+                assertNotNull("Should receive data, but got null", data != null)
                 val object1 = data.getObject("object1")
-                tu.azzert("something" == object1.getString("key1"), "Should have gotten something out of data, but got " + object1.getString("key1"))
-                tu.azzert(15 == object1.getNumber("key2").intValue, "Should have gotten 15 out of data, but got " + object1.getNumber("key2"))
+                assertEquals("Should have gotten something out of data, but got " + object1.getString("key1"), "something", object1.getString("key1"))
+                assertEquals("Should have gotten 15 out of data, but got " + object1.getNumber("key2"), 15, object1.getNumber("key2").intValue)
                 val object2 = data.getObject("object2")
-                tu.azzert("another thing" == object2.getString("key1"), "Should have gotten another thing out of data, but got " + object2.getString("key1"))
-                tu.azzert(16 == object2.getNumber("key2").intValue, "Should have gotten 16 out of data, but got " + object2.getNumber("key2"))
+                assertEquals("Should have gotten another thing out of data, but got " + object2.getString("key1"), "another thing", object2.getString("key1"))
+                assertEquals("Should have gotten 16 out of data, but got " + object2.getNumber("key2"), 16, object2.getNumber("key2").intValue)
                 val object3 = data.getObject("object3")
-                tu.azzert(object3 == null, "where did object3 come from?")
+                assertNull("where did object3 come from?", object3)
                 val teststring = data.getString("teststring")
-                tu.azzert("ok" == teststring, "Should get a teststring")
+                assertEquals("Should get a teststring", "ok", teststring)
                 val answer = data.getNumber("answer")
-                tu.azzert(answer.intValue == 42, "Should get 42 as answer")
+                assertEquals("Should get 42 as answer", 42, answer.intValue)
 
                 if (asynchTests.incrementAndGet == asynchTestCount) {
                   after(sessionId)
@@ -173,23 +174,23 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
             })
 
           // Get saved stuff partially
-          eb.send(smAddress,
+          getVertx().eventBus().send(smAddress,
             new JsonObject().putString("action", "get")
               .putString("sessionId", sessionId)
               .putArray("fields", new JsonArray().addString("object2").addString("teststring")),
             continueAfterNoErrorReply {
               msgAfterGet =>
                 val data = msgAfterGet.body.getObject("data")
-                tu.azzert(data != null, "Should receive data, but got null")
+                assertNotNull("Should receive data, but got null", data)
                 val object1 = data.getObject("object1")
-                tu.azzert(object1 == null, "object1 should not be in the result!")
+                assertNull("object1 should not be in the result!", object1)
                 val object2 = data.getObject("object2")
-                tu.azzert("another thing" == object2.getString("key1"), "Should have gotten another thing out of data, but got " + object2.getString("key1"))
-                tu.azzert(16 == object2.getNumber("key2").intValue, "Should have gotten 16 out of data, but got " + object2.getNumber("key2"))
+                assertEquals("Should have gotten another thing out of data, but got " + object2.getString("key1"), "another thing", object2.getString("key1"))
+                assertEquals("Should have gotten 16 out of data, but got " + object2.getNumber("key2"), 16, object2.getNumber("key2").intValue)
                 val teststring = data.getString("teststring")
-                tu.azzert("ok" == teststring, "Should get a teststring")
+                assertEquals("Should get a teststring", "ok", teststring)
                 val answer = data.getNumber("answer")
-                tu.azzert(answer == null, "Should not get the answer")
+                assertNull("Should not get the answer", answer)
 
                 if (asynchTests.incrementAndGet == asynchTestCount) {
                   after(sessionId)
@@ -200,7 +201,7 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
   }
 
   private def afterGetOpenSessionsDo(after: Int => Unit) {
-    eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"), continueAfterNoErrorReply {
+    getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"), continueAfterNoErrorReply {
       msgAfterStatus =>
         after(msgAfterStatus.body.getNumber("openSessions").intValue)
     })
@@ -208,7 +209,7 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
 
   def testClear() {
     afterClearDo {
-      tu.testComplete
+      testComplete()
     }
   }
 
@@ -216,7 +217,7 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
     afterClearDo {
       afterCreateDo {
         sessionId =>
-          tu.testComplete()
+          testComplete()
       }
     }
   }
@@ -226,13 +227,13 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
       afterPutDo {
         sessionId =>
           // Provoke an error message because of an invalid sessionId
-          eb.send(smAddress,
+          getVertx().eventBus().send(smAddress,
             new JsonObject().putString("action", "put")
               .putString("sessionId", sessionId + "123")
               .putObject("data", someData),
             continueAfterErrorReply("SESSION_GONE") {
               msgAfterErrorPut =>
-                tu.testComplete()
+                testComplete()
             })
       }
     }
@@ -242,7 +243,7 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
     afterClearDo {
       afterPutAndGetDo {
         sessionId =>
-          tu.testComplete()
+          testComplete()
       }
     }
   }
@@ -255,38 +256,38 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
           val asynchTests = new AtomicInteger(0)
 
           // Results in an error
-          eb.send(smAddress,
+          getVertx().eventBus().send(smAddress,
             new JsonObject().putString("action", "get")
               .putString("sessionId", sessionId + "123")
               .putArray("fields", new JsonArray().addString("teststring")),
             continueAfterErrorReply("SESSION_GONE") {
               msgAfterErrorPut =>
                 if (asynchTests.incrementAndGet == asynchTestCount) {
-                  tu.testComplete
+                  testComplete()
                 }
             })
 
           // Results in an error, field missing
-          eb.send(smAddress,
+          getVertx().eventBus().send(smAddress,
             new JsonObject().putString("action", "get")
               .putString("sessionId", sessionId),
             continueAfterErrorReply("FIELDS_MISSING") {
               msgAfterErrorPut =>
                 if (asynchTests.incrementAndGet == asynchTestCount) {
-                  tu.testComplete
+                  testComplete()
                 }
             })
 
           // Results in an error, field missing
-          eb.send(smAddress,
+          getVertx().eventBus().send(smAddress,
             new JsonObject().putString("action", "get")
               .putString("sessionId", sessionId)
               .putString("fields", "teststring"),
             continueAfterNoErrorReply {
               msgAfterNoErrorPut =>
-                tu.azzert("ok" == msgAfterNoErrorPut.body.getObject("data").getString("teststring"), "Should result in the teststring 'ok'")
+                assertEquals("Should result in the teststring 'ok'", "ok", msgAfterNoErrorPut.body.getObject("data").getString("teststring"))
                 if (asynchTests.incrementAndGet == asynchTestCount) {
-                  tu.testComplete
+                  testComplete()
                 }
             })
       }
@@ -300,11 +301,11 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
         val asynchTests = new AtomicInteger(0)
 
         def errorTest(json: JsonObject, error: String) = {
-          eb.send(smAddress, json,
+          getVertx().eventBus().send(smAddress, json,
             continueAfterErrorReply(error) {
               errorMessage =>
                 if (asynchTests.incrementAndGet == asynchTestCount) {
-                  tu.testComplete
+                  testComplete()
                 }
             })
         }
@@ -371,27 +372,27 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
     afterClearDo {
       afterPutAndGetDo {
         sessionId =>
-          eb.send(smAddress, new JsonObject().putString("action", "put")
+          getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "put")
             .putString("sessionId", sessionId)
             .putObject("data", new JsonObject()
               .putObject("object1", new JsonObject().putBoolean("overwritten", true))),
             continueAfterNoErrorReply {
               msgAfterOverride =>
-                eb.send(smAddress, new JsonObject().putString("action", "get")
+                getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "get")
                   .putString("sessionId", sessionId)
                   .putArray("fields", new JsonArray().addString("object1").addString("object2")),
                   continueAfterNoErrorReply {
                     msgAfterGet =>
                       val data = msgAfterGet.body.getObject("data")
-                      tu.azzert(someData.getObject("object2").equals(data.getObject("object2")), "object2 should still exist")
+                      assertEquals("object2 should still exist", someData.getObject("object2"), (data.getObject("object2")))
                       val object1 = someData.getObject("object1")
                       val newObject1 = data.getObject("object1")
-                      tu.azzert(!object1.equals(newObject1), "object1 should be different now")
-                      tu.azzert(newObject1.getString("key1") == null, "key1 should not exist anymore in object1")
-                      tu.azzert(newObject1.getNumber("key2") == null, "key2 should not exist anymore in object1")
-                      tu.azzert(newObject1.getBoolean("overwritten", false), "overwritten should be true in object1")
+                      assertFalse("object1 should be different now", object1.equals(newObject1))
+                      assertNull("key1 should not exist anymore in object1", newObject1.getString("key1"))
+                      assertNull("key2 should not exist anymore in object1", newObject1.getNumber("key2"))
+                      assertTrue("overwritten should be true in object1", newObject1.getBoolean("overwritten", false))
 
-                      tu.testComplete
+                      testComplete()
                   })
             })
       }
@@ -409,74 +410,73 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
               val asynchTestCount = 5
               val asynchTests = new AtomicInteger(0)
 
-              eb.send(smAddress, new JsonObject().putString("action", "status")
+              getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status")
                 .putString("report", "matches")
                 .putObject("data", new JsonObject().putString("teststring", "notok")),
                 continueAfterNoErrorReply {
                   reportMessage =>
-                    tu.azzert(!reportMessage.body.getBoolean("matches", true), "should not match, but got "
-                      + reportMessage.body.getArray("sessions").encode)
-                    tu.azzert(reportMessage.body.getArray("sessions").size == 0, "0 sessions should match")
+                    assertFalse("should not match, but got " + reportMessage.body.getArray("sessions").encode, reportMessage.body.getBoolean("matches", true))
+                    assertEquals("0 sessions should match", 0, reportMessage.body.getArray("sessions").size)
                     if (asynchTests.incrementAndGet == asynchTestCount) {
-                      tu.testComplete
+                      testComplete()
                     }
                 })
 
-              eb.send(smAddress, new JsonObject().putString("action", "status")
+              getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status")
                 .putString("report", "matches")
                 .putObject("data", new JsonObject().putString("teststring", "ok")),
                 continueAfterNoErrorReply {
                   reportMessage =>
-                    tu.azzert(reportMessage.body.getBoolean("matches", false), "should match!")
-                    tu.azzert(reportMessage.body.getArray("sessions").size == 2, "2 sessions should match")
+                    assertTrue("should match!", reportMessage.body.getBoolean("matches", false))
+                    assertEquals("2 sessions should match", 2, reportMessage.body.getArray("sessions").size)
                     for (obj <- reportMessage.body.getArray("sessions")) {
                       val sessId = obj.asInstanceOf[JsonObject].getString("sessionId")
-                      tu.azzert(sessionId1 == sessId || sessionId2 == sessId, "Session " + sessionId1 + " or " + sessionId2 + " should match with " + reportMessage.body.getString("sessionId"))
+                      assertTrue("Session " + sessionId1 + " or " + sessionId2 + " should match with " + reportMessage.body.getString("sessionId"), sessionId1 == sessId || sessionId2 == sessId)
                     }
                     if (asynchTests.incrementAndGet == asynchTestCount) {
-                      tu.testComplete
+                      testComplete()
                     }
                 })
 
-              eb.send(smAddress, new JsonObject().putString("action", "status")
+              getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status")
                 .putString("report", "matches")
                 .putObject("data", new JsonObject().putNumber("answer", 16)),
                 continueAfterNoErrorReply {
                   reportMessage =>
-                    tu.azzert(reportMessage.body.getBoolean("matches", false), "should match!")
-                    tu.azzert(reportMessage.body.getArray("sessions").size == 1, "only 1 session should match")
+                    assertTrue("should match!", reportMessage.body.getBoolean("matches", false))
+                    assertEquals("only 1 session should match", 1, reportMessage.body.getArray("sessions").size)
                     for (obj <- reportMessage.body.getArray("sessions")) {
-                      tu.azzert(sessionId2 == obj.asInstanceOf[JsonObject].getString("sessionId"), "Sessions " + sessionId2 + " should match with " + reportMessage.body.getString("sessionId"))
+                      assertEquals("Sessions " + sessionId2 + " should match with " + reportMessage.body.getString("sessionId"), sessionId2, obj.asInstanceOf[JsonObject].getString("sessionId"))
                     }
                     if (asynchTests.incrementAndGet == asynchTestCount) {
-                      tu.testComplete
+                      testComplete()
                     }
                 })
 
-              eb.send(smAddress, new JsonObject().putString("action", "status")
+              getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status")
                 .putString("report", "matches")
                 .putObject("data", new JsonObject().putString("teststring", "ok").putNumber("answer", 15)),
                 continueAfterNoErrorReply {
                   reportMessage =>
-                    tu.azzert(reportMessage.body.getBoolean("matches", false), "should match!")
-                    tu.azzert(reportMessage.body.getArray("sessions").size == 1, "only 1 session should match")
+                    assertTrue("should match!", reportMessage.body.getBoolean("matches", false))
+                    assertEquals("only 1 session should match", 1, reportMessage.body.getArray("sessions").size)
                     for (obj <- reportMessage.body.getArray("sessions")) {
-                      tu.azzert(sessionId1 == obj.asInstanceOf[JsonObject].getString("sessionId"), "Sessions " + sessionId1 + " should match with " + reportMessage.body.getString("sessionId"))
+                      assertEquals("Sessions " + sessionId1 + " should match with " + reportMessage.body.getString("sessionId"), sessionId1, obj.asInstanceOf[JsonObject].getString("sessionId"))
                     }
                     if (asynchTests.incrementAndGet == asynchTestCount) {
-                      tu.testComplete
+                      testComplete()
                     }
                 })
 
-              eb.send(smAddress, new JsonObject().putString("action", "status")
+              getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status")
                 .putString("report", "matches")
                 .putObject("data", new JsonObject().putString("teststring", "ok").putNumber("answer", 17)),
                 continueAfterNoErrorReply {
                   reportMessage =>
-                    tu.azzert(!reportMessage.body.getBoolean("matches", true), "should not match!")
-                    tu.azzert(reportMessage.body.getArray("sessions").size == 0, "0 sessions should match")
+                    assertFalse("should not match!", reportMessage.body.getBoolean("matches", true))
+                    assertEquals("0 sessions should match", 0, reportMessage.body.getArray("sessions").size)
                     if (asynchTests.incrementAndGet == asynchTestCount) {
-                      tu.testComplete
+                      testComplete()
                     }
                 })
           }
@@ -487,7 +487,7 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
   def testConnectionsReport() {
     afterClearDo {
 
-      eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"),
+      getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"),
         continueAfterNoErrorReply {
           initialOpenSessionsMsg =>
             val initialOpenSessions = initialOpenSessionsMsg.body.getNumber("openSessions").intValue
@@ -497,21 +497,21 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
             for (i <- 1 to asynchTestCount) {
               afterCreateDo {
                 otherSessionId =>
-                  eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"),
+                  getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"),
                     continueAfterNoErrorReply {
                       openSessionsMsg =>
                         val numberOfTest = asynchTests.incrementAndGet
                         if (numberOfTest == asynchTestCount) {
                           val openSessions = openSessionsMsg.body.getNumber("openSessions").intValue
-                          tu.azzert(openSessions >= asynchTestCount, "There should be at least " + asynchTestCount + " open sessions.")
+                          assertTrue("There should be at least " + asynchTestCount + " open sessions.", openSessions >= asynchTestCount)
 
                           // No open sessions after clear?
                           afterClearDo {
-                            eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"), continueAfterNoErrorReply {
+                            getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"), continueAfterNoErrorReply {
                               msgAfterStatus =>
                                 val openSessions = msgAfterStatus.body.getNumber("openSessions", 1000)
-                                tu.azzert(openSessions == 0, "There shouldn't be any open sessions anymore, but got " + openSessions)
-                                tu.testComplete
+                                assertEquals("There shouldn't be any open sessions anymore, but got " + openSessions, 0, openSessions)
+                                testComplete()
                             })
                           }
                         }
@@ -526,31 +526,31 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
     afterClearDo {
       afterPutAndGetDo {
         sessionId =>
-          eb.send(smAddress,
+          getVertx().eventBus().send(smAddress,
             new JsonObject().putString("action", "destroy").putString("sessionId", sessionId),
             continueAfterNoErrorReply {
               msgAfterDestroy =>
-                tu.azzert(msgAfterDestroy.body.getBoolean("sessionDestroyed", false), "session should have been destroyed")
+                assertTrue("session should have been destroyed", msgAfterDestroy.body.getBoolean("sessionDestroyed", false))
 
                 val asynchTestCount = 2
                 val asynchTests = new AtomicInteger(0)
 
-                eb.send(smAddress,
+                getVertx().eventBus().send(smAddress,
                   new JsonObject().putString("action", "get").putString("sessionId", sessionId)
                     .putArray("fields", new JsonArray().addString("object1")),
                   continueAfterErrorReply("SESSION_GONE") {
                     msgAfterGet2 =>
                       if (asynchTests.incrementAndGet == asynchTestCount) {
-                        tu.testComplete()
+                        testComplete()
                       }
                   })
 
                 afterGetOpenSessionsDo {
                   openSessions =>
-                    tu.azzert(openSessions == 0, "There shouldn't be any open sessions anymore, but got: " + openSessions)
+                    assertEquals("There shouldn't be any open sessions anymore, but got: " + openSessions, 0, openSessions)
 
                     if (asynchTests.incrementAndGet == asynchTestCount) {
-                      tu.testComplete()
+                      testComplete()
                     }
                 }
             })
@@ -562,23 +562,23 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
     afterClearDo {
       var unregisterIt = { () => }
       val handler = new Handler[Message[JsonObject]]() {
-        def handle(msg: Message[JsonObject]) {
-          tu.azzert(msg.body.getObject("session") != null, "Should get a real session for cleanup, but got " + msg.body.encode)
+        override def handle(msg: Message[JsonObject]) {
+          assertNotNull("Should get a real session for cleanup, but got " + msg.body.encode, msg.body.getObject("session"))
           msg.body.getObject("session") match {
             case session =>
-              tu.azzert(msg.body.getString("sessionId") != null, "should have a sessionId")
-              tu.azzert(someData.equals(session), "session should equal someData")
-              eb.unregisterHandler(cleanupAddress, this)
-              tu.testComplete
+              assertNotNull("should have a sessionId", msg.body.getString("sessionId"))
+              assertEquals("session should equal someData", someData, session)
+              getVertx().eventBus().unregisterHandler(cleanupAddress, this)
+              testComplete()
           }
         }
       }
 
-      eb.registerHandler(cleanupAddress, handler)
+      getVertx().eventBus().registerHandler(cleanupAddress, handler)
 
       afterPutDo {
         sessionId =>
-          eb.send(smAddress, new JsonObject().putString("action", "destroy").putString("sessionId", sessionId))
+          getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "destroy").putString("sessionId", sessionId))
       }
     }
   }
@@ -587,12 +587,12 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
     afterClearDo {
       afterCreateDo { sessionId =>
         Thread.sleep(defaultTimeout + 100)
-        eb.send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"),
+        getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "status").putString("report", "connections"),
           continueAfterNoErrorReply {
             openSessionsMsg =>
               val openSessions = openSessionsMsg.body.getNumber("openSessions").intValue
-              tu.azzert(openSessions == 0, "Waited long enough - there shouldn't be any open sessions anymore, but got: " + openSessions)
-              tu.testComplete
+              assertEquals("Waited long enough - there shouldn't be any open sessions anymore, but got: " + openSessions, 0, openSessions)
+              testComplete()
           })
       }
     }
@@ -607,24 +607,24 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
           val address = sessionClientPrefix + sessionId
           val handler = new Handler[Message[JsonObject]]() {
             override def handle(msg: Message[JsonObject]) {
-              tu.azzert("error" == msg.body.getString("status"))
+              assertEquals("error", msg.body.getString("status"))
               val statusMessage = msg.body.getString("error")
-              tu.azzert(statusMessage == "SESSION_TIMEOUT", "Error tag should have been SESSION_TIMEOUT, but got: " + statusMessage)
+              assertEquals("Error tag should have been SESSION_TIMEOUT, but got: " + statusMessage, "SESSION_TIMEOUT", statusMessage)
               statusReceived = true
-              eb.unregisterHandler(address, this)
+              getVertx().eventBus().unregisterHandler(address, this)
             }
           }
-          eb.registerHandler(address, handler)
+          getVertx().eventBus().registerHandler(address, handler)
 
           Thread.sleep(timeoutTest)
 
-          eb.send(smAddress, new JsonObject().putString("action", "get")
+          getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "get")
             .putString("sessionId", sessionId)
             .putArray("fields", new JsonArray().addString("teststring")),
             continueAfterErrorReply("SESSION_GONE") {
               errorMsg =>
-                tu.azzert(statusReceived, "Did not receive status 'Session timeout.'!")
-                tu.testComplete
+                assertTrue("Did not receive status 'Session timeout.'!", statusReceived)
+                testComplete()
             })
       }
     }
@@ -637,12 +637,12 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
           Thread.sleep(noTimeoutTest)
           getSessionData(sessionId, new JsonArray().addString("teststring")) {
             data =>
-              tu.azzert("ok".equals(data.getString("teststring")))
+              assertEquals("ok", data.getString("teststring"))
               Thread.sleep(noTimeoutTest)
               getSessionData(sessionId, new JsonArray().addString("teststring")) {
                 data2 =>
-                  tu.azzert("ok".equals(data2.getString("teststring")))
-                  tu.testComplete
+                  assertEquals("ok", data2.getString("teststring"))
+                  testComplete()
               }
           }
       }
@@ -654,16 +654,20 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
       afterPutAndGetDo {
         sessionId =>
           Thread.sleep(noTimeoutTest)
-          eb.send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", sessionId),
+          println("first")
+          getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", sessionId),
             continueAfterNoErrorReply { msg =>
+              println("second")
               Thread.sleep(noTimeoutTest)
-              eb.send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", sessionId),
+              getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", sessionId),
                 continueAfterNoErrorReply { msg =>
+                  println("third")
                   Thread.sleep(noTimeoutTest)
                   getSessionData(sessionId, new JsonArray().addString("teststring")) {
                     data =>
-                      tu.azzert("ok".equals(data.getString("teststring")))
-                      tu.testComplete
+                      println("session data")
+                      assertEquals("ok", data.getString("teststring"))
+                      testComplete()
                   }
                 })
             })
@@ -673,11 +677,10 @@ class SessionManagerTestClient extends TestClientBase with VertxScalaTestHelpers
 
   def testErrorOnHeartbeatWithNotExistingSession() {
     afterClearDo {
-      eb.send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", "not-existing"), continueAfterErrorReply("UNKNOWN_SESSIONID") {
+      getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", "not-existing"), continueAfterErrorReply("UNKNOWN_SESSIONID") {
         msg =>
-          tu.testComplete
+          testComplete()
       })
     }
   }
-
 }

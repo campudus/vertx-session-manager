@@ -1,13 +1,13 @@
 package com.campudus.vertx.sessionmanager
 
 import java.util.UUID
-
 import org.vertx.java.core.AsyncResult
 import org.vertx.java.core.AsyncResultHandler
 import org.vertx.java.core.Handler
 import org.vertx.java.core.Vertx
 import org.vertx.java.core.json.JsonArray
 import org.vertx.java.core.json.JsonObject
+import scala.concurrent.Future
 
 class SharedDataSessionStore(sm: SessionManager, sharedSessionsName: String, sharedSessionTimeoutsName: String) extends SessionManagerSessionStore with VertxScalaHelpers {
 
@@ -15,15 +15,15 @@ class SharedDataSessionStore(sm: SessionManager, sharedSessionsName: String, sha
   val sharedSessions = vertx.sharedData.getMap[String, String](sharedSessionsName)
   val sharedSessionTimeouts = vertx.sharedData.getMap[String, String](sharedSessionTimeoutsName)
 
-  def clearAllSessions(resultHandler: AsyncResultHandler[Boolean]) = {
+  override def clearAllSessions(): Future[Boolean] = {
     import scala.collection.JavaConversions._
     for ((sessionId, sessionString) <- sharedSessions) {
       sm.destroySession(sessionId, None)
     }
-    resultHandler.handle(true)
+    Future.successful(true)
   }
 
-  def getMatches(data: JsonObject, resultHandler: AsyncResultHandler[JsonArray]) = {
+  override def getMatches(data: JsonObject): Future[JsonArray] = {
     import scala.collection.JavaConversions._
     val sessionsArray = new JsonArray()
     for ((id, sessionString) <- sharedSessions) {
@@ -32,81 +32,68 @@ class SharedDataSessionStore(sm: SessionManager, sharedSessionsName: String, sha
         sessionsArray.addObject(sessionData.putString("sessionId", id))
       }
     }
-    resultHandler.handle(sessionsArray)
+    Future.successful(sessionsArray)
   }
 
-  def getOpenSessions(resultHandler: AsyncResultHandler[Long]) = resultHandler.handle(sharedSessions.size)
+  override def getOpenSessions(): Future[Long] = Future.successful(sharedSessions.size)
 
-  def getSessionData(sessionId: String, fields: JsonArray, resultHandler: AsyncResultHandler[JsonObject]): Unit = sharedSessions.get(sessionId) match {
+  override def getSessionData(sessionId: String, fields: JsonArray): Future[JsonObject] = sharedSessions.get(sessionId) match {
     case null =>
-      resultHandler.handle(new AsyncResult(new SessionException("SESSION_GONE", "Cannot get data from session '" + sessionId + "'. Session is gone.")))
+      Future.failed(new SessionException("SESSION_GONE", "Cannot get data from session '" + sessionId + "'. Session is gone."))
     case sessionString =>
       // session is still in use, change timeout
       val session = new JsonObject(sessionString)
       val result = new JsonObject
-      for (key <- fields.toArray) {
-        session.getField(key.toString) match {
-          case null => // Unknown field: Do not put into result
-          case elem: JsonArray => result.putArray(key.toString, elem)
-          case elem: Array[Byte] => result.putBinary(key.toString, elem)
-          case elem: java.lang.Boolean => result.putBoolean(key.toString, elem)
-          case elem: Number => result.putNumber(key.toString, elem)
-          case elem: JsonObject => result.putObject(key.toString, elem)
-          case elem: String => result.putString(key.toString, elem)
-          case unknownType => // Unknown type: Do not put into result
-        }
+      for (key <- fields.toArray if key.isInstanceOf[String]) {
+        result.putValue(key.toString, session.getField(key.toString))
       }
-      resultHandler.handle(new JsonObject().putObject("data", result))
+      Future.successful(new JsonObject().putObject("data", result))
   }
 
-  def putSession(sessionId: String, data: JsonObject, resultHandler: AsyncResultHandler[Boolean]) = {
+  override def putSession(sessionId: String, data: JsonObject): Future[Boolean] = {
     sharedSessions.get(sessionId) match {
       case null =>
-        resultHandler.handle(new AsyncResult(new SessionException("SESSION_GONE", "Could not find session with id '" + sessionId + "'.")))
+        Future.failed(new SessionException("SESSION_GONE", "Could not find session with id '" + sessionId + "'."))
       case sessionString =>
         val session = new JsonObject(sessionString)
         session.mergeIn(data)
         sharedSessions.put(sessionId, session.encode)
-        resultHandler.handle(true)
+        Future.successful(true)
     }
   }
 
-  def removeSession(sessionId: String, timerId: Option[Long], resultHandler: AsyncResultHandler[JsonObject]) {
-    val actualTimerId = if (timerId.isDefined) {
-      if (sharedSessionTimeouts.remove(sessionId, timerId.get.toString)) {
-        timerId.get
-      } else {
-        return
-      }
-    } else {
-      sharedSessionTimeouts.remove(sessionId).toLong
+  override def removeSession(sessionId: String, timerId: Option[Long]): Future[JsonObject] = {
+    val (timerRemoved, actualTimerId) = timerId match {
+      case Some(id) => (sharedSessionTimeouts.remove(sessionId, id.toString), id)
+      case None => (false, sharedSessionTimeouts.remove(sessionId).toLong)
     }
-    resultHandler.handle(
-      new JsonObject().putNumber("sessionTimer", actualTimerId).
-        putObject("session", new JsonObject(sharedSessions.remove(sessionId))))
+
+    Future.successful(json.putNumber("sessionTimer", actualTimerId)
+      .putBoolean("timerRemoved", timerRemoved)
+      .putObject("session", new JsonObject(sharedSessions.remove(sessionId))))
   }
 
-  def resetTimer(sessionId: String, newTimerId: Long, resultHandler: AsyncResultHandler[Long]) = sharedSessionTimeouts.get(sessionId) match {
+  override def resetTimer(sessionId: String, newTimerId: Long): Future[Long] = sharedSessionTimeouts.get(sessionId) match {
     case null =>
-      resultHandler.handle(new AsyncResult(new SessionException("UNKNOWN_SESSIONID", "Could not find session with id '" + sessionId + "'.")))
+      Future.failed(new SessionException("UNKNOWN_SESSIONID", "Could not find session with id '" + sessionId + "'."))
     case timerId =>
       if (sharedSessionTimeouts.replace(sessionId, timerId, newTimerId.toString)) {
-        resultHandler.handle(timerId.toLong)
+        Future.successful(timerId.toLong)
       } else {
-        resultHandler.handle(new AsyncResult(new SessionException("TIMER_EXPIRED", "Could not reset timer for session with id '" + sessionId + "'.")))
+        Future.failed(new SessionException("TIMER_EXPIRED", "Could not reset timer for session with id '" + sessionId + "'."))
       }
   }
 
-  def startSession(resultHandler: AsyncResultHandler[String]) = {
+  override def startSession(): Future[String] = {
     val sessionId = UUID.randomUUID.toString
     sharedSessions.putIfAbsent(sessionId, "{}") match {
       case null =>
         sharedSessionTimeouts.put(sessionId, sm.createTimer(sessionId).toString)
         // There is no session with this uuid -> return it
-        resultHandler.handle(sessionId)
+        Future.successful(sessionId)
       case anotherSessionId =>
         // There was a session with this uuid -> create a new one
-        startSession(resultHandler)
+        startSession()
     }
   }
 }
