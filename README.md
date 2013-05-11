@@ -6,7 +6,7 @@ The latest version of this module can be found in the [campudus/vertx-session-ma
 
 ## Dependencies
 
-This module requires the scala language module (org.scala-lang.scala-library-v2.10) to work. It is built against Vert.x 2.0.0.
+This module is built against Vert.x 2.0.0.
 
 It uses either SharedData maps provided by Vert.x or a MongoDB to save its information, depending on your configuration (see below).
 
