@@ -77,7 +77,7 @@ Please edit the details below.
  */
 def configurePom(def pom) {
   pom.project {
-    description 'A module to provide sessions via the event bus'
+    description 'The session manager stores session data via the event bus'
     inceptionYear '2013'
     packaging 'zip'
     url 'http://www.github.com/campudus/vertx-session-manager'
@@ -91,7 +91,7 @@ def configurePom(def pom) {
     }
 
     scm {
-      url 'http://www.github.com/campudus/vertx-session-manager'
+      url 'git://github.com/campudus/vertx-session-manager.git'
     }
 
     licenses {
