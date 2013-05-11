@@ -10,7 +10,11 @@ This module requires the scala language module (org.scala-lang.scala-library-v2.
 
 It uses either SharedData maps provided by Vert.x or a MongoDB to save its information, depending on your configuration (see below).
 
+### Note about using the Session Manager with MongoDB
+
 If you want to use MongoDB, the [Vert.x MongoDB Persistor](https://github.com/vert-x/mod-mongo-persistor) is required.
+
+The mongo-persistor module needs to have this [pull request](https://github.com/vert-x/mod-mongo-persistor/pull/22) incorporated, otherwise it will not work with this snapshot version.
 
 ## Name
 
