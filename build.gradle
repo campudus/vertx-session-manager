@@ -77,6 +77,7 @@ Please edit the details below.
  */
 def configurePom(def pom) {
   pom.project {
+    name 'Vert.x Session Manager'
     description 'The session manager stores session data via the event bus'
     inceptionYear '2013'
     packaging 'zip'
