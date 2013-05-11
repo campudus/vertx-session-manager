@@ -71,7 +71,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] with Ver
 
   private def replyOk(success: JsonObject)(implicit message: Message[JsonObject]): Unit = {
     val body = success.putString("status", "ok")
-    println("   ok reply: " + body)
     message.reply(body)
   }
   private def replyError(error: Throwable)(implicit message: Message[JsonObject]): Unit = {
@@ -83,7 +82,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] with Ver
   }
   private def replyError(id: String, message: String)(implicit msg: Message[JsonObject]): Unit = {
     val body = json.putString("status", "error").putString("error", id).putString("message", message)
-    println("error reply: " + body)
     msg.reply(body)
   }
   private def replyResult(res: Try[JsonObject])(implicit message: Message[JsonObject]): Unit = res match {
@@ -102,16 +100,13 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] with Ver
   def createTimer(sessionId: String) = {
     val timerId = vertx.setTimer(configTimeout, new Handler[java.lang.Long]() {
       def handle(timerId: java.lang.Long) {
-        println("destroy timer " + timerId + " removes session " + sessionId)
         destroySession(sessionId, Some(timerId), "SESSION_TIMEOUT")
       }
     })
-    println("created timer " + timerId + "      in session " + sessionId)
     timerId
   }
 
   def cancelTimer(timerId: Long) = {
-    println("removed timer " + timerId)
     vertx.cancelTimer(timerId)
   }
 
@@ -160,8 +155,6 @@ class SessionManager extends Verticle with Handler[Message[JsonObject]] with Ver
 
   override def handle(msg: Message[JsonObject]) {
     implicit val message = msg
-
-    println("got message: " + message.body.encode)
 
     Option[Any](message.body.getField("action")) match {
       case Some("get") => Option[Any](message.body.getField("sessionId")) match {

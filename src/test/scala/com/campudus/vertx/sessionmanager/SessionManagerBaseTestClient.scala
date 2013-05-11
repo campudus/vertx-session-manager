@@ -43,8 +43,10 @@ abstract class SessionManagerBaseTestClient extends TestVerticle with VertxScala
   private def deployAndStart() = {
     // Deploy the module - the System property `vertx.modulename` will contain the name of the module so you
     // don't have to hardcode it in your tests
+    println("deploying " + System.getProperty("vertx.modulename"))
     container.deployModule(System.getProperty("vertx.modulename"), sessionManagerConfig, { asyncResult: AsyncResult[String] =>
       // Deployment is asynchronous and this this handler will be called when it's complete (or failed)
+      if (asyncResult.failed()) asyncResult.cause.printStackTrace()
       assertTrue("should succeed with deployment", asyncResult.succeeded())
       assertNotNull("deploymentID should not be null", asyncResult.result())
       // If deployed correctly then start the tests!
@@ -654,18 +656,14 @@ abstract class SessionManagerBaseTestClient extends TestVerticle with VertxScala
       afterPutAndGetDo {
         sessionId =>
           Thread.sleep(noTimeoutTest)
-          println("first")
           getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", sessionId),
             continueAfterNoErrorReply { msg =>
-              println("second")
               Thread.sleep(noTimeoutTest)
               getVertx().eventBus().send(smAddress, new JsonObject().putString("action", "heartbeat").putString("sessionId", sessionId),
                 continueAfterNoErrorReply { msg =>
-                  println("third")
                   Thread.sleep(noTimeoutTest)
                   getSessionData(sessionId, new JsonArray().addString("teststring")) {
                     data =>
-                      println("session data")
                       assertEquals("ok", data.getString("teststring"))
                       testComplete()
                   }

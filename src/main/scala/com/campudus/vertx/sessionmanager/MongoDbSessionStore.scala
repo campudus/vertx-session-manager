@@ -21,64 +21,55 @@ class MongoDbSessionStore(sm: SessionManager, address: String, collection: Strin
   val vertx = sm.getVertx()
   val logger = sm.getContainer().logger()
 
-  private def checkMongoErrors(mongoReply: Message[JsonObject]): Future[JsonObject] = {
+  private def checkMongoErrors(mongoReply: Message[JsonObject]): JsonObject = {
     mongoReply.body.getString("status") match {
-      case "ok" => Future.successful(mongoReply.body)
+      case "ok" => mongoReply.body
       case _ =>
         val ex = new SessionException("MONGODB_ERROR", mongoReply.body().getString("message"))
         logger.warn("Session error: " + ex)
-        Future.failed(ex)
+        throw ex
     }
   }
 
-  // TODO use findAndModify as soon as available
   override def clearAllSessions(): Future[Boolean] = {
     import scala.collection.JavaConversions._
-    sendToPersistor(mongoAction("find").putObject("matcher", json)) flatMap checkMongoErrors flatMap { reply =>
+    sendToPersistor(mongoAction("find").putObject("matcher", json)) map checkMongoErrors flatMap { reply =>
       val results = reply.getArray("results")
       for (result <- results) {
         val res = result.asInstanceOf[JsonObject]
         sm.clearSession(res.getString("sessionId"), res.getNumber("sessionTimer").longValue(), res.getObject("data"))
       }
-      sendToPersistor(mongoAction("delete").putObject("matcher", json)) flatMap checkMongoErrors map (_ => true)
+      sendToPersistor(mongoAction("delete").putObject("matcher", json)) map checkMongoErrors map (_ => true)
     }
   }
 
   override def getMatches(data: JsonObject): Future[JsonArray] = {
-    sendToPersistor(mongoAction("find").putObject("matcher", toDataNotation(data))) flatMap checkMongoErrors map (
+    sendToPersistor(mongoAction("find").putObject("matcher", toDataNotation(data))) map checkMongoErrors map (
       obj => obj.getArray("results"))
   }
 
   override def getOpenSessions(): Future[Long] = {
-    sendToPersistor(mongoAction("count")) flatMap checkMongoErrors map (obj => obj.getNumber("count").longValue)
+    sendToPersistor(mongoAction("count")) map checkMongoErrors map (obj => obj.getNumber("count").longValue)
   }
 
   override def getSessionData(sessionId: String, fields: JsonArray): Future[JsonObject] = {
     val searchFor = json.putString("sessionId", sessionId)
     val action = mongoAction("findone").putObject("matcher", searchFor).
       putObject("keys", jsonArrayToFieldSelection(fields))
-    sendToPersistor(action) flatMap checkMongoErrors flatMap { result =>
+    sendToPersistor(action) map checkMongoErrors map { result =>
       Option(result.getObject("result")) match {
-        case None =>
-          Future.failed(SessionException.gone())
-        case Some(foundSession) =>
-          Future.successful(foundSession)
+        case None => throw SessionException.gone()
+        case Some(foundSession) => foundSession
       }
     }
   }
 
-  // TODO find and update with findAndModify when available
   override def putSession(sessionId: String, data: JsonObject): Future[Boolean] = {
     val searchFor = json.putString("sessionId", sessionId)
-    sendToPersistor(mongoAction("findone").putObject("matcher", searchFor)) flatMap checkMongoErrors flatMap { result =>
-      result.getObject("result") match {
-        case obj: JsonObject =>
-          sendToPersistor(
-            mongoAction("update")
-              .putObject("criteria", searchFor)
-              .putObject("objNew", json.putObject("$set", toDataNotation(data)))) flatMap checkMongoErrors map (_ => true)
-        case _ =>
-          Future.failed(SessionException.gone())
+    sendToPersistor(findAndModify(Some(searchFor), Some(json.putObject("$set", toDataNotation(data))))) map checkMongoErrors map { reply =>
+      Option(reply.getObject("result").getObject("value")) match {
+        case None => throw SessionException.gone()
+        case Some(obj) => true
       }
     }
   }
@@ -90,13 +81,13 @@ class MongoDbSessionStore(sm: SessionManager, address: String, collection: Strin
       putObject("matcher", searchFor).
       putObject("keys", json
         .putBoolean("data", true)
-        .putBoolean("sessionTimer", true))) flatMap checkMongoErrors flatMap { findResult =>
+        .putBoolean("sessionTimer", true))) map checkMongoErrors flatMap { findResult =>
       Option(findResult.getObject("result")) match {
         case None =>
           Future.failed(SessionException.gone())
         case Some(obj) =>
           // timerId does not matter since it is saved together with the session
-          sendToPersistor(mongoAction("delete").putObject("matcher", searchFor)) flatMap checkMongoErrors map {
+          sendToPersistor(mongoAction("delete").putObject("matcher", searchFor)) map checkMongoErrors map {
             deleteResult =>
               json
                 .putNumber("sessionTimer", obj.getNumber("sessionTimer"))
@@ -132,62 +123,36 @@ class MongoDbSessionStore(sm: SessionManager, address: String, collection: Strin
     }
     upsert.foreach(cmd.putBoolean("upsert", _))
 
-    cmd.encode
+    json.putString("action", "command").putString("command", cmd.encode())
   }
 
   private def sessionTimerUpdate(query: JsonObject, update: JsonObject) = {
-    val cmd = findAndModify(query = Some(query), update = Some(update), fields = List("sessionTimer"))
-
-    println("cmd: " + cmd)
-    json.putString("action", "command").putString("command", cmd)
+    findAndModify(query = Some(query), update = Some(update), fields = List("sessionTimer"))
   }
 
   private def findAndUpdateSessionTimer(sessionId: String, newTimerId: Long): Future[Long] = {
     val query = json.putString("sessionId", sessionId)
     val update = json.putObject("$set", json.putNumber("sessionTimer", newTimerId))
 
-    sendToPersistor(sessionTimerUpdate(query, update)) flatMap checkMongoErrors map { reply =>
-      val oldTimerId = reply.getObject("result").getObject("value").getLong("sessionTimer")
-      println("updated timer " + oldTimerId + " to " + newTimerId + " in session " + sessionId)
-      oldTimerId
+    sendToPersistor(sessionTimerUpdate(query, update)) map checkMongoErrors map { reply =>
+      Option(reply.getObject("result").getObject("value")) match {
+        case None => throw new SessionException("UNKNOWN_SESSIONID", s"The session with id '${sessionId}' could not be found")
+        case Some(obj) => obj.getLong("sessionTimer")
+      }
     }
   }
 
   override def resetTimer(sessionId: String, newTimerId: Long): Future[Long] = {
     findAndUpdateSessionTimer(sessionId, newTimerId)
-    //
-    //    val searchFor = json.putString("sessionId", sessionId)
-    //
-    //    sendToPersistor(mongoAction("findone").
-    //      putObject("matcher", searchFor).
-    //      putObject("keys", json.putBoolean("sessionTimer", true))) flatMap checkMongoErrors flatMap { result =>
-    //      Option(result.getObject("result")) match {
-    //        case None =>
-    //          Future.failed(new SessionException("UNKNOWN_SESSIONID", "Could not find session with id '" + sessionId + "'."))
-    //        case Some(foundSession) =>
-    //          val oldTimerId = foundSession.getLong("sessionTimer")
-    //          val replaceObj = searchFor.putNumber("sessionTimer", oldTimerId)
-    //
-    //          sendToPersistor(mongoAction("update")
-    //            .putObject("criteria", replaceObj)
-    //            .putObject("objNew", json.putObject("$set",
-    //              json.putNumber("sessionTimer", newTimerId)))) flatMap checkMongoErrors map { obj =>
-    //            println("updated timer " + oldTimerId + " to " + newTimerId + "?!? session " + sessionId)
-    //
-    //            oldTimerId
-    //          }
-    //      }
-    //    }
   }
 
-  // TODO use findAndModify to create a new session, if none available with this sessionId
   override def startSession(): Future[String] = {
     val sessionId = UUID.randomUUID.toString
     val timerId = sm.createTimer(sessionId)
     sendToPersistor(mongoAction("save")
       .putObject("document", json
         .putString("sessionId", sessionId)
-        .putNumber("sessionTimer", timerId))) flatMap checkMongoErrors transform ({
+        .putNumber("sessionTimer", timerId))) map checkMongoErrors transform ({
       case _ => sessionId
     }, {
       case error =>
@@ -198,9 +163,7 @@ class MongoDbSessionStore(sm: SessionManager, address: String, collection: Strin
 
   private def sendToPersistor(obj: JsonObject): Future[Message[JsonObject]] = {
     val p = Promise[Message[JsonObject]]
-    println("send to persistor: " + obj.encode())
     vertx.eventBus.send(address, obj, fnToHandler({ (msg: Message[JsonObject]) =>
-      println("msg from persistor: " + msg.body.encode)
       p.success(msg)
     }))
     p.future
