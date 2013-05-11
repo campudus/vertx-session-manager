@@ -1,5 +1,5 @@
 {
-  "main": "com.campudus.vertx.sessionmanager.SessionManager"
+  "main": "com.campudus.vertx.sessionmanager.SessionManager",
   "name":"com.campudus~session-manager~2.0.0-SNAPSHOT",
   "description":"The session manager stores session data via the event bus",
   "license":"The Apache Software License 2.0",
