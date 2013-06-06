@@ -22,7 +22,7 @@ class SessionManagerMongoDbTest extends SessionManagerBaseTestClient {
       if (ar.succeeded()) {
         promise.success()
       } else {
-        promise.failure(new RuntimeException("could not deploy mongo-persistor!"))
+        promise.failure(new RuntimeException("could not deploy mongo-persistor: " + ar.cause().getMessage() + "\n" + ar.cause().getStackTraceString))
       }
     })
     promise.future

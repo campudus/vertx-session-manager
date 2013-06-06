@@ -58,7 +58,9 @@ abstract class SessionManagerBaseTestClient extends TestVerticle with VertxScala
     // Make sure we call initialize() - this sets up the assert stuff so assert functionality works correctly
     initialize()
 
-    setUp map (_ => deployAndStart())
+    setUp map (_ => deployAndStart()) recover {
+      case e => fail("Could not set up: " + e.getMessage() + "\n" + e.getStackTraceString)
+    }
   }
 
   /**
