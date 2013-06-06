@@ -1,11 +1,10 @@
 {
   "main": "com.campudus.vertx.sessionmanager.SessionManager",
-  "name":"com.campudus~session-manager~2.0.0-SNAPSHOT",
-  "description":"The session manager stores session data via the event bus",
-  "license":"The Apache Software License 2.0",
-  "homepage":"http://www.github.com/campudus/vertx-session-manager",
-  "keywords":["data", "session", "storage", "temporary"],
+
+  "description":"Stores session data in-memory and removes it, if not needed anymore.",
+  "licenses":["The Apache Software License 2.0"],
   "author":"Campudus",
-  "repository":"http://www.github.com/campudus/vertx-session-manager/",
-  "contributors":["Joern Bernhardt", "Maximilian Stemplinger"]
+  "keywords":["cookies", "databases", "eventbus", "memory", "server", "session", "storage", "temporary"],
+  "homepage":"http://www.github.com/campudus/vertx-session-manager",
+  "developers":["Joern Bernhardt", "Maximilian Stemplinger"]
 }
