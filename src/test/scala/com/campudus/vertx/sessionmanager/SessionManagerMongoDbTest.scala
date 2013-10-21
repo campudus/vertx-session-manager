@@ -18,7 +18,7 @@ class SessionManagerMongoDbTest extends SessionManagerBaseTestClient {
 
   override protected def setUp() = {
     val promise = Promise[Unit]
-    container.deployModule("io.vertx~mod-mongo-persistor~2.0.0-SNAPSHOT", mongoConfig, { ar: AsyncResult[String] =>
+    container.deployModule("io.vertx~mod-mongo-persistor~2.0.0-final", mongoConfig, { ar: AsyncResult[String] =>
       if (ar.succeeded()) {
         promise.success()
       } else {

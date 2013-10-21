@@ -6,15 +6,13 @@ The latest version of this module can be found in the [campudus/vertx-session-ma
 
 ## Dependencies
 
-This module is built against Vert.x 2.0.0.
+This module is built against Vert.x 2.0.2-final.
 
 It uses either SharedData maps provided by Vert.x or a MongoDB to save its information, depending on your configuration (see below).
 
 ### Note about using the Session Manager with MongoDB
 
 If you want to use MongoDB, the [Vert.x MongoDB Persistor](https://github.com/vert-x/mod-mongo-persistor) is required.
-
-The mongo-persistor module needs to have this [pull request](https://github.com/vert-x/mod-mongo-persistor/pull/22) incorporated, otherwise it will not work with this snapshot version.
 
 ## Name
 
@@ -69,7 +67,7 @@ Operations are sent by specifying an `action` String and required and optional p
         "message" : "Some kind of descriptive text, what went wrong exactly"
     }
 
-The session manager can also _raise_ errors to the client directly, sending an error message to `campudus.session.94b1a3fe-16df-4ab2-ac10-aae67ad2c46d` for example, if the prefix is set to `campudus.sessions.`. If you provide an action which the session manager does not know, it will reply with error `UNKNOWN_COMMAND`.
+The session manager can also _raise_ errors to the client directly, sending an error message to `campudus.sessions.94b1a3fe-16df-4ab2-ac10-aae67ad2c46d` for example, if the prefix is set to `campudus.sessions.`. If you provide an action which the session manager does not know, it will reply with error `UNKNOWN_COMMAND`.
 
 ### start
 
