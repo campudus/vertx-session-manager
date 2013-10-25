@@ -16,7 +16,7 @@ If you want to use MongoDB, the [Vert.x MongoDB Persistor](https://github.com/ve
 
 ## Name
 
-The module name is `com.campudus.session-manager`.
+The module name is `com.campudus~session-manager~2.0.1-final`.
 
 ## Configuration
 
